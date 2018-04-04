@@ -1,0 +1,6 @@
+[package]
+name = "ndi"
+version = "0.1.0"
+authors = ["rubenrua <rubenrua@teltek.es>"]
+
+[dependencies]
