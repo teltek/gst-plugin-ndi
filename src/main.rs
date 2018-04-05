@@ -129,6 +129,16 @@ fn main() {
 
 
           match frame_type {
+              NDIlib_frame_type_video => {
+                  println!("Tengo video {:?}",
+                      video_frame
+                  );
+              },
+             NDIlib_frame_type_audio => {
+                  println!("Tengo audio {:?}",
+                      audio_frame
+                  );
+              },
               NDIlib_frame_type_metadata => {
                   println!("Tengo metadata {} '{}'",
                       metadata_frame.length,
