@@ -3,7 +3,7 @@ name = "gst-plugin-ndi"
 version = "0.1.0"
 authors = ["Ruben Gonzalez <rubenrua@teltek.es>"]
 repository = "https://gitlab.teltek.es/rubenrua/ndi-rs.git"
-license = "unknow" # TODO MIT/Apache-2.0
+license = "LGPL"
 
 [dependencies]
 gst-plugin = { git = "https://github.com/sdroege/gst-plugin-rs" }
