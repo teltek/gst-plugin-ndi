@@ -15,9 +15,7 @@ extern "C" {
     pub fn NDIlib_recv_create_v3(
         p_create_settings: *const NDIlib_recv_create_v3_t,
     ) -> NDIlib_recv_instance_t;
-    pub fn NDIlib_find_destroy(
-        p_instance: NDIlib_find_instance_t,
-    );
+    pub fn NDIlib_find_destroy(p_instance: NDIlib_find_instance_t);
     pub fn NDIlib_recv_set_tally(
         p_instance: NDIlib_recv_instance_t,
         p_tally: *const NDIlib_tally_t,
@@ -47,14 +45,13 @@ pub struct NDIlib_find_create_t {
 
 impl Default for NDIlib_find_create_t {
     fn default() -> Self {
-        NDIlib_find_create_t { 
+        NDIlib_find_create_t {
             show_local_sources: true,
             p_groups: ptr::null(),
-            p_extra_ips: ptr::null()
+            p_extra_ips: ptr::null(),
         }
     }
 }
-
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -64,14 +61,13 @@ pub struct NDIlib_source_t {
 }
 
 impl Default for NDIlib_source_t {
-    fn default() -> Self { 
-        NDIlib_source_t { 
+    fn default() -> Self {
+        NDIlib_source_t {
             p_ndi_name: ptr::null(),
-            p_ip_address: ptr::null()
+            p_ip_address: ptr::null(),
         }
     }
 }
-
 
 //TODO review enum
 pub type NDIlib_frame_type_e = i32;
@@ -82,27 +78,35 @@ pub const NDIlib_frame_type_metadata: NDIlib_frame_type_e = 3;
 pub const NDIlib_frame_type_error: NDIlib_frame_type_e = 4;
 pub const NDIlib_frame_type_status_change: NDIlib_frame_type_e = 100;
 
-
 pub type NDIlib_recv_bandwidth_e = i32;
-pub const NDIlib_recv_bandwidth_e_NDIlib_recv_bandwidth_metadata_only: NDIlib_recv_bandwidth_e = -10;
+pub const NDIlib_recv_bandwidth_e_NDIlib_recv_bandwidth_metadata_only: NDIlib_recv_bandwidth_e =
+    -10;
 pub const NDIlib_recv_bandwidth_e_NDIlib_recv_bandwidth_audio_only: NDIlib_recv_bandwidth_e = 10;
 pub const NDIlib_recv_bandwidth_e_NDIlib_recv_bandwidth_lowest: NDIlib_recv_bandwidth_e = 0;
 pub const NDIlib_recv_bandwidth_e_NDIlib_recv_bandwidth_highest: NDIlib_recv_bandwidth_e = 100;
 
-
 pub type NDIlib_recv_color_format_e = u32;
-pub const NDIlib_recv_color_format_e_NDIlib_recv_color_format_BGRX_BGRA: NDIlib_recv_color_format_e = 0;
-pub const NDIlib_recv_color_format_e_NDIlib_recv_color_format_UYVY_BGRA: NDIlib_recv_color_format_e = 1;
-pub const NDIlib_recv_color_format_e_NDIlib_recv_color_format_RGBX_RGBA: NDIlib_recv_color_format_e = 2;
-pub const NDIlib_recv_color_format_e_NDIlib_recv_color_format_UYVY_RGBA: NDIlib_recv_color_format_e = 3;
-pub const NDIlib_recv_color_format_e_NDIlib_recv_color_format_fastest: NDIlib_recv_color_format_e = 100;
-pub const NDIlib_recv_color_format_e_NDIlib_recv_color_format_e_BGRX_BGRA: NDIlib_recv_color_format_e = 0;
-pub const NDIlib_recv_color_format_e_NDIlib_recv_color_format_e_UYVY_BGRA: NDIlib_recv_color_format_e = 1;
-pub const NDIlib_recv_color_format_e_NDIlib_recv_color_format_e_RGBX_RGBA: NDIlib_recv_color_format_e = 2;
-pub const NDIlib_recv_color_format_e_NDIlib_recv_color_format_e_UYVY_RGBA: NDIlib_recv_color_format_e = 3;
+pub const NDIlib_recv_color_format_e_NDIlib_recv_color_format_BGRX_BGRA:
+    NDIlib_recv_color_format_e = 0;
+pub const NDIlib_recv_color_format_e_NDIlib_recv_color_format_UYVY_BGRA:
+    NDIlib_recv_color_format_e = 1;
+pub const NDIlib_recv_color_format_e_NDIlib_recv_color_format_RGBX_RGBA:
+    NDIlib_recv_color_format_e = 2;
+pub const NDIlib_recv_color_format_e_NDIlib_recv_color_format_UYVY_RGBA:
+    NDIlib_recv_color_format_e = 3;
+pub const NDIlib_recv_color_format_e_NDIlib_recv_color_format_fastest: NDIlib_recv_color_format_e =
+    100;
+pub const NDIlib_recv_color_format_e_NDIlib_recv_color_format_e_BGRX_BGRA:
+    NDIlib_recv_color_format_e = 0;
+pub const NDIlib_recv_color_format_e_NDIlib_recv_color_format_e_UYVY_BGRA:
+    NDIlib_recv_color_format_e = 1;
+pub const NDIlib_recv_color_format_e_NDIlib_recv_color_format_e_RGBX_RGBA:
+    NDIlib_recv_color_format_e = 2;
+pub const NDIlib_recv_color_format_e_NDIlib_recv_color_format_e_UYVY_RGBA:
+    NDIlib_recv_color_format_e = 3;
 
 #[repr(C)]
-#[derive(Debug,Copy,Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct NDIlib_recv_create_v3_t {
     pub source_to_connect_to: NDIlib_source_t,
     pub color_format: NDIlib_recv_color_format_e,
@@ -112,22 +116,21 @@ pub struct NDIlib_recv_create_v3_t {
 }
 
 impl Default for NDIlib_recv_create_v3_t {
-    fn default() -> Self { 
+    fn default() -> Self {
         NDIlib_recv_create_v3_t {
             source_to_connect_to: Default::default(),
             allow_video_fields: true,
             bandwidth: NDIlib_recv_bandwidth_e_NDIlib_recv_bandwidth_highest,
             color_format: NDIlib_recv_color_format_e_NDIlib_recv_color_format_UYVY_BGRA,
-            p_ndi_name: ptr::null()
+            p_ndi_name: ptr::null(),
         }
     }
 }
 
 pub type NDIlib_recv_instance_t = *mut ::std::os::raw::c_void;
 
-
 #[repr(C)]
-#[derive(Debug,Copy,Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct NDIlib_tally_t {
     pub on_program: bool,
     pub on_preview: bool,
@@ -137,34 +140,31 @@ impl Default for NDIlib_tally_t {
     fn default() -> Self {
         NDIlib_tally_t {
             on_program: false,
-            on_preview: false
+            on_preview: false,
         }
     }
 }
 
 #[repr(C)]
-#[derive(Debug,Copy,Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct NDIlib_metadata_frame_t {
     pub length: ::std::os::raw::c_int,
-    pub timecode: i64, 
+    pub timecode: i64,
     pub p_data: *const ::std::os::raw::c_char,
 }
-
 
 impl Default for NDIlib_metadata_frame_t {
     fn default() -> Self {
         NDIlib_metadata_frame_t {
             length: 0,
             timecode: 0, //NDIlib_send_timecode_synthesize,
-            p_data: ptr::null()
+            p_data: ptr::null(),
         }
     }
 }
 
-
-
 #[repr(C)]
-#[derive(Debug,Copy,Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct NDIlib_video_frame_v2_t {
     pub xres: ::std::os::raw::c_int,
     pub yres: ::std::os::raw::c_int,
@@ -190,18 +190,17 @@ impl Default for NDIlib_video_frame_v2_t {
             frame_rate_D: 0,
             picture_aspect_ratio: 0.0,
             frame_format_type: 0,
-            timecode: 0,  //NDIlib_send_timecode_synthesize,
+            timecode: 0, //NDIlib_send_timecode_synthesize,
             p_data: ptr::null(),
             line_stride_in_bytes: 0,
             p_metadata: ptr::null(),
-            timestamp: 0
+            timestamp: 0,
         }
     }
 }
 
-
 #[repr(C)]
-#[derive(Debug,Copy,Clone)]
+#[derive(Debug, Copy, Clone)]
 pub struct NDIlib_audio_frame_v2_t {
     pub sample_rate: ::std::os::raw::c_int,
     pub no_channels: ::std::os::raw::c_int,
@@ -223,7 +222,7 @@ impl Default for NDIlib_audio_frame_v2_t {
             p_data: ptr::null(),
             channel_stride_in_bytes: 0,
             p_metadata: ptr::null(),
-            timestamp: 0
+            timestamp: 0,
         }
     }
 }
