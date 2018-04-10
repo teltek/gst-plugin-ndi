@@ -69,41 +69,55 @@ impl Default for NDIlib_source_t {
     }
 }
 
-//TODO review enum
-pub type NDIlib_frame_type_e = i32;
-pub const NDIlib_frame_type_none: NDIlib_frame_type_e = 0;
-pub const NDIlib_frame_type_video: NDIlib_frame_type_e = 1;
-pub const NDIlib_frame_type_audio: NDIlib_frame_type_e = 2;
-pub const NDIlib_frame_type_metadata: NDIlib_frame_type_e = 3;
-pub const NDIlib_frame_type_error: NDIlib_frame_type_e = 4;
-pub const NDIlib_frame_type_status_change: NDIlib_frame_type_e = 100;
+#[repr(i32)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum NDIlib_frame_type_e {
+    NDIlib_frame_type_none = 0,
+    NDIlib_frame_type_video = 1,
+    NDIlib_frame_type_audio = 2,
+    NDIlib_frame_type_metadata = 3,
+    NDIlib_frame_type_error = 4,
+    NDIlib_frame_type_status_change = 100,
+}
 
-pub type NDIlib_recv_bandwidth_e = i32;
-pub const NDIlib_recv_bandwidth_metadata_only: NDIlib_recv_bandwidth_e = -10;
-pub const NDIlib_recv_bandwidth_audio_only: NDIlib_recv_bandwidth_e = 10;
-pub const NDIlib_recv_bandwidth_lowest: NDIlib_recv_bandwidth_e = 0;
-pub const NDIlib_recv_bandwidth_highest: NDIlib_recv_bandwidth_e = 100;
+#[repr(i32)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum NDIlib_recv_bandwidth_e {
+    NDIlib_recv_bandwidth_metadata_only = -10,
+    NDIlib_recv_bandwidth_audio_only = 10,
+    NDIlib_recv_bandwidth_lowest = 0,
+    NDIlib_recv_bandwidth_highest = 100,
+}
 
-pub type NDIlib_recv_color_format_e = u32;
-pub const NDIlib_recv_color_format_BGRX_BGRA: NDIlib_recv_color_format_e = 0;
-pub const NDIlib_recv_color_format_UYVY_BGRA: NDIlib_recv_color_format_e = 1;
-pub const NDIlib_recv_color_format_RGBX_RGBA: NDIlib_recv_color_format_e = 2;
-pub const NDIlib_recv_color_format_UYVY_RGBA: NDIlib_recv_color_format_e = 3;
-pub const NDIlib_recv_color_format_fastest: NDIlib_recv_color_format_e = 100;
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum NDIlib_recv_color_format_e {
+    NDIlib_recv_color_format_BGRX_BGRA = 0,
+    NDIlib_recv_color_format_UYVY_BGRA = 1,
+    NDIlib_recv_color_format_RGBX_RGBA = 2,
+    NDIlib_recv_color_format_UYVY_RGBA = 3,
+    NDIlib_recv_color_format_fastest = 100,
+}
 
-pub type NDIlib_FourCC_type_e = u32;
-pub const NDIlib_FourCC_type_UYVY: NDIlib_FourCC_type_e = 1498831189;
-pub const NDIlib_FourCC_type_BGRA: NDIlib_FourCC_type_e = 1095911234;
-pub const NDIlib_FourCC_type_BGRX: NDIlib_FourCC_type_e = 1481787202;
-pub const NDIlib_FourCC_type_RGBA: NDIlib_FourCC_type_e = 1094862674;
-pub const NDIlib_FourCC_type_RGBX: NDIlib_FourCC_type_e = 1480738642;
-pub const NDIlib_FourCC_type_UYVA: NDIlib_FourCC_type_e = 1096178005;
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum NDIlib_FourCC_type_e {
+    NDIlib_FourCC_type_UYVY = 1498831189,
+    NDIlib_FourCC_type_BGRA = 1095911234,
+    NDIlib_FourCC_type_BGRX = 1481787202,
+    NDIlib_FourCC_type_RGBA = 1094862674,
+    NDIlib_FourCC_type_RGBX = 1480738642,
+    NDIlib_FourCC_type_UYVA = 1096178005,
+}
 
-pub type NDIlib_frame_format_type_e = u32;
-pub const NDIlib_frame_format_type_progressive: NDIlib_frame_format_type_e = 1;
-pub const NDIlib_frame_format_type_interleaved: NDIlib_frame_format_type_e = 0;
-pub const NDIlib_frame_format_type_field_0: NDIlib_frame_format_type_e = 2;
-pub const NDIlib_frame_format_type_field_1: NDIlib_frame_format_type_e = 3;
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+pub enum NDIlib_frame_format_type_e {
+    NDIlib_frame_format_type_progressive = 1,
+    NDIlib_frame_format_type_interleaved = 0,
+    NDIlib_frame_format_type_field_0 = 2,
+    NDIlib_frame_format_type_field_1 = 3,
+}
 
 pub const NDIlib_send_timecode_synthesize: i64 = ::std::i64::MAX;
 pub const NDIlib_send_timecode_empty: i64 = 0;
@@ -124,8 +138,8 @@ impl Default for NDIlib_recv_create_v3_t {
         NDIlib_recv_create_v3_t {
             source_to_connect_to: Default::default(),
             allow_video_fields: true,
-            bandwidth: NDIlib_recv_bandwidth_highest,
-            color_format: NDIlib_recv_color_format_UYVY_BGRA,
+            bandwidth: NDIlib_recv_bandwidth_e::NDIlib_recv_bandwidth_highest,
+            color_format: NDIlib_recv_color_format_e::NDIlib_recv_color_format_UYVY_BGRA,
             p_ndi_name: ptr::null(),
         }
     }
@@ -189,11 +203,11 @@ impl Default for NDIlib_video_frame_v2_t {
         NDIlib_video_frame_v2_t {
             xres: 0,
             yres: 0,
-            FourCC: NDIlib_FourCC_type_UYVY,
+            FourCC: NDIlib_FourCC_type_e::NDIlib_FourCC_type_UYVY,
             frame_rate_N: 30000,
             frame_rate_D: 1001,
             picture_aspect_ratio: 0.0,
-            frame_format_type: NDIlib_frame_format_type_progressive,
+            frame_format_type: NDIlib_frame_format_type_e::NDIlib_frame_format_type_progressive,
             timecode: NDIlib_send_timecode_synthesize,
             p_data: ptr::null(),
             line_stride_in_bytes: 0,

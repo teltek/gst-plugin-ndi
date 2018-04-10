@@ -95,13 +95,13 @@ fn main() {
             );
 
             match frame_type {
-                NDIlib_frame_type_video => {
+                NDIlib_frame_type_e::NDIlib_frame_type_video => {
                     println!("Tengo video {:?}", video_frame);
                 }
-                NDIlib_frame_type_audio => {
+                NDIlib_frame_type_e::NDIlib_frame_type_audio => {
                     println!("Tengo audio {:?}", audio_frame);
                 }
-                NDIlib_frame_type_metadata => {
+                NDIlib_frame_type_e::NDIlib_frame_type_metadata => {
                     println!(
                         "Tengo metadata {} '{}'",
                         metadata_frame.length,
@@ -110,7 +110,7 @@ fn main() {
                             .into_owned(),
                     );
                 }
-                NDIlib_frame_type_error => {
+                NDIlib_frame_type_e::NDIlib_frame_type_error => {
                     println!(
                         "Tengo error {} '{}'",
                         metadata_frame.length,
@@ -120,7 +120,7 @@ fn main() {
                     );
                     break;
                 }
-                _ => println!("Tengo {}", frame_type),
+                _ => println!("Tengo {:?}", frame_type),
             }
         }
     }
