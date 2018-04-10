@@ -54,8 +54,8 @@ fn main() {
       let p_ndi_name = CString::new("Galicaster NDI Receiver").unwrap();
       let NDI_recv_create_desc = NDIlib_recv_create_v3_t {
           source_to_connect_to: *p_sources,
-          allow_video_fields: false,
-          bandwidth: NDIlib_recv_bandwidth_e_NDIlib_recv_bandwidth_lowest,
+          allow_video_fields: true,
+          bandwidth: NDIlib_recv_bandwidth_e_NDIlib_recv_bandwidth_highest,
           color_format: NDIlib_recv_color_format_e_NDIlib_recv_color_format_BGRX_BGRA,
           p_ndi_name: p_ndi_name.as_ptr(), //ptr::null(),
       };
