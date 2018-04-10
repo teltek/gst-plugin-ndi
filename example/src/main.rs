@@ -18,11 +18,7 @@ fn main() {
       }
 
       //TODO valores por defecto
-      let NDI_find_create_desc = NDIlib_find_create_t {
-          show_local_sources: false,
-          p_groups: ptr::null(),
-          p_extra_ips: ptr::null()
-      };
+      let NDI_find_create_desc: NDIlib_find_create_t = Default::default();
       let pNDI_find = NDIlib_find_create_v2(&NDI_find_create_desc);
       if pNDI_find.is_null() {
           println!("Cannot run NDI: NDIlib_find_create_v2 error.");
@@ -54,10 +50,8 @@ fn main() {
       let p_ndi_name = CString::new("Galicaster NDI Receiver").unwrap();
       let NDI_recv_create_desc = NDIlib_recv_create_v3_t {
           source_to_connect_to: *p_sources,
-          allow_video_fields: true,
-          bandwidth: NDIlib_recv_bandwidth_e_NDIlib_recv_bandwidth_highest,
-          color_format: NDIlib_recv_color_format_e_NDIlib_recv_color_format_BGRX_BGRA,
-          p_ndi_name: p_ndi_name.as_ptr(), //ptr::null(),
+          p_ndi_name: p_ndi_name.as_ptr(), 
+          ..Default::default()
       };
 
 
@@ -71,10 +65,7 @@ fn main() {
       NDIlib_find_destroy(pNDI_find);
 
       // We are now going to mark this source as being on program output for tally purposes (but not on preview)
-      let tally_state = NDIlib_tally_t {
-          on_program: true,
-          on_preview: true,
-      };
+      let tally_state: NDIlib_tally_t = Default::default();
       NDIlib_recv_set_tally(pNDI_recv, &tally_state);
 
 
@@ -92,38 +83,10 @@ fn main() {
 
       loop {
 
-          let video_frame = NDIlib_video_frame_v2_t {
-              xres: 0,
-              yres: 0,
-              FourCC: 0,
-              frame_rate_N: 0,
-              frame_rate_D: 0,
-              picture_aspect_ratio: 0.0,
-              frame_format_type: 0,
-              timecode: 0,
-              p_data: ptr::null(),
-              line_stride_in_bytes: 0,
-              p_metadata: ptr::null(),
-              timestamp: 0,
-          };
+          let video_frame: NDIlib_video_frame_v2_t = Default::default();
+          let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
+          let metadata_frame: NDIlib_metadata_frame_t = Default::default();
 
-
-          let audio_frame = NDIlib_audio_frame_v2_t {
-              sample_rate: 0,
-              no_channels: 0,
-              no_samples: 0,
-              timecode: 0,
-              p_data: ptr::null(),
-              channel_stride_in_bytes: 0,
-              p_metadata: ptr::null(),
-              timestamp: 0,
-          };
-
-          let metadata_frame = NDIlib_metadata_frame_t {
-              length: 0,
-              timecode: 0,
-              p_data: ptr::null(),
-          };
 
           let frame_type = NDIlib_recv_capture_v2(pNDI_recv, &video_frame, &audio_frame, &metadata_frame, 1000);
 

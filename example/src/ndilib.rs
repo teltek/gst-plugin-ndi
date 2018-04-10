@@ -1,5 +1,7 @@
 #![allow(non_camel_case_types, non_upper_case_globals)]
 
+use std::ptr;
+
 #[link(name = "ndi")]
 extern "C" {
     pub fn NDIlib_initialize() -> bool;
@@ -43,11 +45,31 @@ pub struct NDIlib_find_create_t {
     pub p_extra_ips: *const ::std::os::raw::c_char,
 }
 
+impl Default for NDIlib_find_create_t {
+    fn default() -> Self {
+        NDIlib_find_create_t { 
+            show_local_sources: true,
+            p_groups: ptr::null(),
+            p_extra_ips: ptr::null()
+        }
+    }
+}
+
+
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct NDIlib_source_t {
     pub p_ndi_name: *const ::std::os::raw::c_char,
     pub p_ip_address: *const ::std::os::raw::c_char,
+}
+
+impl Default for NDIlib_source_t {
+    fn default() -> Self { 
+        NDIlib_source_t { 
+            p_ndi_name: ptr::null(),
+            p_ip_address: ptr::null()
+        }
+    }
 }
 
 
@@ -89,6 +111,18 @@ pub struct NDIlib_recv_create_v3_t {
     pub p_ndi_name: *const ::std::os::raw::c_char,
 }
 
+impl Default for NDIlib_recv_create_v3_t {
+    fn default() -> Self { 
+        NDIlib_recv_create_v3_t {
+            source_to_connect_to: Default::default(),
+            allow_video_fields: true,
+            bandwidth: NDIlib_recv_bandwidth_e_NDIlib_recv_bandwidth_highest,
+            color_format: NDIlib_recv_color_format_e_NDIlib_recv_color_format_UYVY_BGRA,
+            p_ndi_name: ptr::null()
+        }
+    }
+}
+
 pub type NDIlib_recv_instance_t = *mut ::std::os::raw::c_void;
 
 
@@ -99,13 +133,35 @@ pub struct NDIlib_tally_t {
     pub on_preview: bool,
 }
 
+impl Default for NDIlib_tally_t {
+    fn default() -> Self {
+        NDIlib_tally_t {
+            on_program: false,
+            on_preview: false
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Debug,Copy,Clone)]
 pub struct NDIlib_metadata_frame_t {
     pub length: ::std::os::raw::c_int,
-    pub timecode: i64,
+    pub timecode: i64, 
     pub p_data: *const ::std::os::raw::c_char,
 }
+
+
+impl Default for NDIlib_metadata_frame_t {
+    fn default() -> Self {
+        NDIlib_metadata_frame_t {
+            length: 0,
+            timecode: 0, //NDIlib_send_timecode_synthesize,
+            p_data: ptr::null()
+        }
+    }
+}
+
+
 
 #[repr(C)]
 #[derive(Debug,Copy,Clone)]
@@ -124,6 +180,25 @@ pub struct NDIlib_video_frame_v2_t {
     pub timestamp: i64,
 }
 
+impl Default for NDIlib_video_frame_v2_t {
+    fn default() -> Self {
+        NDIlib_video_frame_v2_t {
+            xres: 0,
+            yres: 0,
+            FourCC: 0,
+            frame_rate_N: 0,
+            frame_rate_D: 0,
+            picture_aspect_ratio: 0.0,
+            frame_format_type: 0,
+            timecode: 0,  //NDIlib_send_timecode_synthesize,
+            p_data: ptr::null(),
+            line_stride_in_bytes: 0,
+            p_metadata: ptr::null(),
+            timestamp: 0
+        }
+    }
+}
+
 
 #[repr(C)]
 #[derive(Debug,Copy,Clone)]
@@ -136,4 +211,19 @@ pub struct NDIlib_audio_frame_v2_t {
     pub channel_stride_in_bytes: ::std::os::raw::c_int,
     pub p_metadata: *const ::std::os::raw::c_char,
     pub timestamp: i64,
+}
+
+impl Default for NDIlib_audio_frame_v2_t {
+    fn default() -> Self {
+        NDIlib_audio_frame_v2_t {
+            sample_rate: 48000,
+            no_channels: 2,
+            no_samples: 0,
+            timecode: 0, //NDIlib_send_timecode_synthesize,
+            p_data: ptr::null(),
+            channel_stride_in_bytes: 0,
+            p_metadata: ptr::null(),
+            timestamp: 0
+        }
+    }
 }
