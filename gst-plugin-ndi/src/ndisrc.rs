@@ -34,8 +34,9 @@ const DEFAULT_MUTE: bool = false;
 const DEFAULT_IS_LIVE: bool = false;
 
 // Property value storage
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct Settings {
+    stream_name: String,
     samples_per_buffer: u32,
     freq: u32,
     volume: f64,
@@ -46,6 +47,7 @@ struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
+            stream_name: String::from("Fixed ndi stream name"),
             samples_per_buffer: DEFAULT_SAMPLES_PER_BUFFER,
             freq: DEFAULT_FREQ,
             volume: DEFAULT_VOLUME,
@@ -56,7 +58,14 @@ impl Default for Settings {
 }
 
 // Metadata for the properties
-static PROPERTIES: [Property; 5] = [
+static PROPERTIES: [Property; 6] = [
+    Property::String(
+        "stream-name",
+        "Sream Name",
+        "Name of the streaming device",
+        None,
+        PropertyMutability::ReadWrite,
+    ),
     Property::UInt(
         "samples-per-buffer",
         "Samples Per Buffer",
@@ -255,6 +264,22 @@ impl ObjectImpl<BaseSrc> for NdiSrc {
         let element = obj.clone().downcast::<BaseSrc>().unwrap();
 
         match *prop {
+            Property::String("stream-name", ..) => {
+                let mut settings = self.settings.lock().unwrap();
+                let stream_name = value.get().unwrap();
+                gst_info!(
+                    self.cat,
+                    obj: &element,
+                    "Changing stream-name from {} to {}",
+                    settings.stream_name,
+                    stream_name
+                );
+                settings.stream_name = stream_name;
+                drop(settings);
+
+                let _ =
+                    element.post_message(&gst::Message::new_latency().src(Some(&element)).build());
+            }
             Property::UInt("samples-per-buffer", ..) => {
                 let mut settings = self.settings.lock().unwrap();
                 let samples_per_buffer = value.get().unwrap();
@@ -329,6 +354,11 @@ impl ObjectImpl<BaseSrc> for NdiSrc {
         let prop = &PROPERTIES[id as usize];
 
         match *prop {
+            Property::UInt("stream-name", ..) => {
+                let settings = self.settings.lock().unwrap();
+                //TODO to_value supongo que solo funciona con numeros
+                Ok(settings.stream_name.to_value())
+            }
             Property::UInt("samples-per-buffer", ..) => {
                 let settings = self.settings.lock().unwrap();
                 Ok(settings.samples_per_buffer.to_value())
@@ -393,7 +423,7 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
 
         element.set_blocksize(info.bpf() * (*self.settings.lock().unwrap()).samples_per_buffer);
 
-        let settings = *self.settings.lock().unwrap();
+        let settings = &*self.settings.lock().unwrap();
         let mut state = self.state.lock().unwrap();
 
         // If we have no caps yet, any old sample_offset and sample_stop will be
@@ -468,7 +498,7 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
             // We can't output samples before they were produced, and the last sample of a buffer
             // is produced that much after the beginning, leading to this latency calculation
             QueryView::Latency(ref mut q) => {
-                let settings = *self.settings.lock().unwrap();
+                let settings = &*self.settings.lock().unwrap();
                 let state = self.state.lock().unwrap();
 
                 if let Some(ref info) = state.info {
@@ -497,7 +527,7 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
         // Keep a local copy of the values of all our properties at this very moment. This
         // ensures that the mutex is never locked for long and the application wouldn't
         // have to block until this function returns when getting/setting property values
-        let settings = *self.settings.lock().unwrap();
+        let settings = &*self.settings.lock().unwrap();
 
         // Get a locked reference to our state, i.e. the input and output AudioInfo
         let mut state = self.state.lock().unwrap();
