@@ -666,114 +666,114 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
     }
 
     fn is_seekable(&self, _element: &BaseSrc) -> bool {
-        true
+        false
     }
 
-    fn do_seek(&self, element: &BaseSrc, segment: &mut gst::Segment) -> bool {
-        // Handle seeking here. For Time and Default (sample offset) seeks we can
-        // do something and have to update our sample offset and accumulator accordingly.
-        //
-        // Also we should remember the stop time (so we can stop at that point), and if
-        // reverse playback is requested. These values will all be used during buffer creation
-        // and for calculating the timestamps, etc.
-
-        if segment.get_rate() < 0.0 {
-            gst_error!(self.cat, obj: element, "Reverse playback not supported");
-            return false;
-        }
-
-        let settings = *self.settings.lock().unwrap();
-        let mut state = self.state.lock().unwrap();
-
-        // We store sample_offset and sample_stop in nanoseconds if we
-        // don't know any sample rate yet. It will be converted correctly
-        // once a sample rate is known.
-        let rate = match state.info {
-            None => gst::SECOND_VAL,
-            Some(ref info) => info.rate() as u64,
-        };
-
-        if let Some(segment) = segment.downcast_ref::<gst::format::Time>() {
-            use std::f64::consts::PI;
-
-            let sample_offset = segment
-                .get_start()
-                .unwrap()
-                .mul_div_floor(rate, gst::SECOND_VAL)
-                .unwrap();
-
-            let sample_stop = segment
-                .get_stop()
-                .map(|v| v.mul_div_floor(rate, gst::SECOND_VAL).unwrap());
-
-            let accumulator =
-                (sample_offset as f64).rem(2.0 * PI * (settings.freq as f64) / (rate as f64));
-
-            gst_debug!(
-                self.cat,
-                obj: element,
-                "Seeked to {}-{:?} (accum: {}) for segment {:?}",
-                sample_offset,
-                sample_stop,
-                accumulator,
-                segment
-            );
-
-            *state = State {
-                info: state.info.clone(),
-                sample_offset: sample_offset,
-                sample_stop: sample_stop,
-                accumulator: accumulator,
-            };
-
-            true
-        } else if let Some(segment) = segment.downcast_ref::<gst::format::Default>() {
-            use std::f64::consts::PI;
-
-            if state.info.is_none() {
-                gst_error!(
-                    self.cat,
-                    obj: element,
-                    "Can only seek in Default format if sample rate is known"
-                );
-                return false;
-            }
-
-            let sample_offset = segment.get_start().unwrap();
-            let sample_stop = segment.get_stop().0;
-
-            let accumulator =
-                (sample_offset as f64).rem(2.0 * PI * (settings.freq as f64) / (rate as f64));
-
-            gst_debug!(
-                self.cat,
-                obj: element,
-                "Seeked to {}-{:?} (accum: {}) for segment {:?}",
-                sample_offset,
-                sample_stop,
-                accumulator,
-                segment
-            );
-
-            *state = State {
-                info: state.info.clone(),
-                sample_offset: sample_offset,
-                sample_stop: sample_stop,
-                accumulator: accumulator,
-            };
-
-            true
-        } else {
-            gst_error!(
-                self.cat,
-                obj: element,
-                "Can't seek in format {:?}",
-                segment.get_format()
-            );
-
-            false
-        }
-    }
+    // fn do_seek(&self, element: &BaseSrc, segment: &mut gst::Segment) -> bool {
+    //     // Handle seeking here. For Time and Default (sample offset) seeks we can
+    //     // do something and have to update our sample offset and accumulator accordingly.
+    //     //
+    //     // Also we should remember the stop time (so we can stop at that point), and if
+    //     // reverse playback is requested. These values will all be used during buffer creation
+    //     // and for calculating the timestamps, etc.
+    //
+    //     if segment.get_rate() < 0.0 {
+    //         gst_error!(self.cat, obj: element, "Reverse playback not supported");
+    //         return false;
+    //     }
+    //
+    //     let settings = *self.settings.lock().unwrap();
+    //     let mut state = self.state.lock().unwrap();
+    //
+    //     // We store sample_offset and sample_stop in nanoseconds if we
+    //     // don't know any sample rate yet. It will be converted correctly
+    //     // once a sample rate is known.
+    //     let rate = match state.info {
+    //         None => gst::SECOND_VAL,
+    //         Some(ref info) => info.rate() as u64,
+    //     };
+    //
+    //     if let Some(segment) = segment.downcast_ref::<gst::format::Time>() {
+    //         use std::f64::consts::PI;
+    //
+    //         let sample_offset = segment
+    //             .get_start()
+    //             .unwrap()
+    //             .mul_div_floor(rate, gst::SECOND_VAL)
+    //             .unwrap();
+    //
+    //         let sample_stop = segment
+    //             .get_stop()
+    //             .map(|v| v.mul_div_floor(rate, gst::SECOND_VAL).unwrap());
+    //
+    //         let accumulator =
+    //             (sample_offset as f64).rem(2.0 * PI * (settings.freq as f64) / (rate as f64));
+    //
+    //         gst_debug!(
+    //             self.cat,
+    //             obj: element,
+    //             "Seeked to {}-{:?} (accum: {}) for segment {:?}",
+    //             sample_offset,
+    //             sample_stop,
+    //             accumulator,
+    //             segment
+    //         );
+    //
+    //         *state = State {
+    //             info: state.info.clone(),
+    //             sample_offset: sample_offset,
+    //             sample_stop: sample_stop,
+    //             accumulator: accumulator,
+    //         };
+    //
+    //         true
+    //     } else if let Some(segment) = segment.downcast_ref::<gst::format::Default>() {
+    //         use std::f64::consts::PI;
+    //
+    //         if state.info.is_none() {
+    //             gst_error!(
+    //                 self.cat,
+    //                 obj: element,
+    //                 "Can only seek in Default format if sample rate is known"
+    //             );
+    //             return false;
+    //         }
+    //
+    //         let sample_offset = segment.get_start().unwrap();
+    //         let sample_stop = segment.get_stop().0;
+    //
+    //         let accumulator =
+    //             (sample_offset as f64).rem(2.0 * PI * (settings.freq as f64) / (rate as f64));
+    //
+    //         gst_debug!(
+    //             self.cat,
+    //             obj: element,
+    //             "Seeked to {}-{:?} (accum: {}) for segment {:?}",
+    //             sample_offset,
+    //             sample_stop,
+    //             accumulator,
+    //             segment
+    //         );
+    //
+    //         *state = State {
+    //             info: state.info.clone(),
+    //             sample_offset: sample_offset,
+    //             sample_stop: sample_stop,
+    //             accumulator: accumulator,
+    //         };
+    //
+    //         true
+    //     } else {
+    //         gst_error!(
+    //             self.cat,
+    //             obj: element,
+    //             "Can't seek in format {:?}",
+    //             segment.get_format()
+    //         );
+    //
+    //         false
+    //     }
+    // }
 
     fn unlock(&self, element: &BaseSrc) -> bool {
         // This should unblock the create() function ASAP, so we
