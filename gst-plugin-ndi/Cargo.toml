@@ -6,12 +6,12 @@ repository = "https://gitlab.teltek.es/rubenrua/ndi-rs.git"
 license = "unknow" # TODO MIT/Apache-2.0
 
 [dependencies]
-gst-plugin = { git = "https://github.com/sdroege/gst-plugin-rs" }
-glib = { git = "https://github.com/gtk-rs/glib" }
-gstreamer = { git = "https://github.com/sdroege/gstreamer-rs" }
-gstreamer-base = { git = "https://github.com/sdroege/gstreamer-rs" }
-gstreamer-video = { git = "https://github.com/sdroege/gstreamer-rs" }
-gstreamer-audio = { git = "https://github.com/sdroege/gstreamer-rs" }
+gst-plugin = "0.2"
+glib = "0.5"
+gstreamer = "0.11"
+gstreamer-base = "0.11"
+gstreamer-video = "0.11"
+gstreamer-audio = "0.11"
 byte-slice-cast = "0.1" # TODO delete
 num-traits = "0.2" # TODO delete
 
