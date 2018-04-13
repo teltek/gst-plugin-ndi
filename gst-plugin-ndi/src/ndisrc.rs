@@ -27,6 +27,11 @@ use std::{i32, u32};
 use num_traits::cast::NumCast;
 use num_traits::float::Float;
 
+use std::ptr;
+use std::ffi::{CStr, CString};
+
+use ndilib::*;
+
 // Default values of properties
 const DEFAULT_SAMPLES_PER_BUFFER: u32 = 1024;
 const DEFAULT_FREQ: u32 = 440;
@@ -111,6 +116,7 @@ static PROPERTIES: [Property; 6] = [
 // and sample offset
 struct State {
     info: Option<gst_video::VideoInfo>,
+    recv: Option<NDIlib_recv_instance_t>,
     // sample_offset: u64,
     // sample_stop: Option<u64>,
     // accumulator: f64,
@@ -120,6 +126,7 @@ impl Default for State {
     fn default() -> State {
         State {
             info: None,
+            //recv: None,
             // sample_offset: 0,
             // sample_stop: None,
             // accumulator: 0.0,
@@ -277,7 +284,7 @@ impl ObjectImpl<BaseSrc> for NdiSrc {
             Property::String("stream-name", ..) => {
                 let mut settings = self.settings.lock().unwrap();
                 let stream_name = value.get().unwrap();
-                gst_info!(
+                gst_warning!(
                     self.cat,
                     obj: &element,
                     "Changing stream-name from {} to {}",
@@ -482,7 +489,7 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
         *self.state.lock().unwrap() = Default::default();
         self.unlock_stop(element);
 
-        gst_info!(self.cat, obj: element, "Started");
+        gst_warning!(self.cat, obj: element, "Starting");
 
         true
     }

@@ -19,6 +19,7 @@ extern crate byte_slice_cast;
 extern crate num_traits;
 
 mod ndisrc;
+pub mod ndilib;
 
 // Plugin entry point that should register all elements provided by this plugin,
 // and everything else that this plugin might provide (e.g. typefinders or device providers).
