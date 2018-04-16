@@ -116,7 +116,7 @@ static PROPERTIES: [Property; 6] = [
 // and sample offset
 struct State {
     info: Option<gst_video::VideoInfo>,
-    recv: Option<NDIlib_recv_instance_t>,
+    recv: Option<NdiInstance>,
     // sample_offset: u64,
     // sample_stop: Option<u64>,
     // accumulator: f64,
@@ -126,7 +126,7 @@ impl Default for State {
     fn default() -> State {
         State {
             info: None,
-            //recv: None,
+            recv: None,
             // sample_offset: 0,
             // sample_stop: None,
             // accumulator: 0.0,
@@ -440,7 +440,8 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
 
         let mut state = self.state.lock().unwrap();
             *state = State {
-            info: Some(info),
+              info: Some(info),
+              recv: None
             };
 
         // element.set_blocksize(info.bpf() * (*self.settings.lock().unwrap()).samples_per_buffer);
