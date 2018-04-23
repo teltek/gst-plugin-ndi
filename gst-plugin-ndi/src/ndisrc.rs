@@ -663,6 +663,9 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
             let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
             let metadata_frame: NDIlib_metadata_frame_t = Default::default();
 
+            //TODO Solo hacemos el buffer cuando tengamos un frame de video
+            let mut frame = false;
+            while !frame{
             let frame_type = NDIlib_recv_capture_v2(
                 pNDI_recv,
                 &video_frame,
@@ -674,7 +677,7 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
             match frame_type {
                 NDIlib_frame_type_e::NDIlib_frame_type_video => {
                     println!("Tengo video {:?}", video_frame);
-
+                    frame = true;
                 }
                 NDIlib_frame_type_e::NDIlib_frame_type_audio => {
                     println!("Tengo audio {:?}", audio_frame);
@@ -700,6 +703,7 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
                 }
                 _ => println!("Tengo {:?}", frame_type),
             }
+        }
         // }
 
 
@@ -727,6 +731,16 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
             gst::Buffer::with_size(200 * 400).unwrap();
         {
             let buffer = buffer.get_mut().unwrap();
+            let pts: gst::ClockTime = (video_frame.timestamp as u64).into();
+            let duration: gst::ClockTime = (334624).into();
+            buffer.set_pts(pts);
+            buffer.set_duration(duration);
+            // Map the buffer writable and create the actual samples
+            let mut map = buffer.map_writable().unwrap();
+            let mut data = map.as_slice();
+            //data = &mut video_frame.p_data;
+            let a = CStr::from_ptr(video_frame.p_data);
+            data = a.to_bytes();
 
         //     // Calculate the current timestamp (PTS) and the next one,
         //     // and calculate the duration from the difference instead of
