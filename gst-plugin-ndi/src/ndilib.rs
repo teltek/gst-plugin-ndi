@@ -148,7 +148,9 @@ impl Default for NDIlib_recv_create_v3_t {
 pub type NDIlib_recv_instance_t = *mut ::std::os::raw::c_void;
 
 //Rust wrapper around *mut ::std::os::raw::c_void
-pub struct NdiInstance (NDIlib_recv_instance_t);
+pub struct NdiInstance {
+    pub recv: NDIlib_recv_instance_t,
+}
 
 unsafe impl ::std::marker::Send for NdiInstance {}
 
