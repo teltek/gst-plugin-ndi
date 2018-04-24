@@ -196,6 +196,7 @@ impl NdiSrc {
                 (
                     "format",
                     &gst::List::new(&[
+                    &gst_video::VideoFormat::Uyvy.to_string(),
                     &gst_video::VideoFormat::Rgb.to_string(),
                     &gst_video::VideoFormat::Gray8.to_string(),
                 ]),
@@ -625,13 +626,16 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
     //     BaseSrcBase::parent_query(element, query)
     // }
 
-    // Creates the audio buffers
+
+
+    //Creates the audio buffers
     fn create(
         &self,
         element: &BaseSrc,
         _offset: u64,
         _length: u32,
     ) -> Result<gst::Buffer, gst::FlowReturn> {
+        println!("Principio create");
         // Keep a local copy of the values of all our properties at this very moment. This
         // ensures that the mutex is never locked for long and the application wouldn't
         // have to block until this function returns when getting/setting property values
@@ -728,13 +732,14 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
         //TODO Set buffer size from data received from NDI
         let mut buffer =
             // gst::Buffer::with_size((n_samples as usize) * (info.bpf() as usize)).unwrap();
-            gst::Buffer::with_size(200 * 400).unwrap();
+            gst::Buffer::with_size(720 * 576 * 2).unwrap();
         {
             let buffer = buffer.get_mut().unwrap();
             let pts: gst::ClockTime = (video_frame.timestamp as u64).into();
             let duration: gst::ClockTime = (334624).into();
-            buffer.set_pts(pts);
-            buffer.set_duration(duration);
+            // buffer.set_pts(pts);
+            //buffer.set_pts(pts);
+            // buffer.set_duration(duration);
             // Map the buffer writable and create the actual samples
             let mut map = buffer.map_writable().unwrap();
             let mut data = map.as_slice();
@@ -852,7 +857,7 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
         }
 
         gst_debug!(self.cat, obj: element, "Produced buffer {:?}", buffer);
-
+        println!("Final create");
         Ok(buffer)
     }
     }
