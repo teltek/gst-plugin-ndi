@@ -418,23 +418,34 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
             
 
 
-            let mut buffer = gst::Buffer::with_size(720 * 576 * 2).unwrap();
             //let mut buffer = gst::Buffer::from_slice(video_frame.p_data).unwrap();
+            let mut buffer = gst::Buffer::with_size(720 * 576 * 2).unwrap();
+
+            { 
+                let mut len = 720 * 576 * 2;
+                let mut vec = unsafe { Vec::from_raw_parts(video_frame.p_data as *mut u8, len, len) };
+                let mutbuffer = buffer.get_mut().unwrap();
+                mutbuffer.copy_from_slice(0, &vec).unwrap();
+
+            }
             
+
             
             {
-                //rr let buffer = buffer.get_mut().unwrap();
+                /*
+                let buffer = buffer.get_mut().unwrap();
                 //rr let pts: gst::ClockTime = (video_frame.timestamp as u64).into();
                 //rr let duration: gst::ClockTime = (334624).into();
                 //rr // buffer.set_pts(pts);
                 //rr //buffer.set_pts(pts);
                 //rr // buffer.set_duration(duration);
                 //rr // Map the buffer writable and create the actual samples
-                //rr let mut map = buffer.map_writable().unwrap();
-                //rr let mut data = map.as_slice();
-                //rr //data = &mut video_frame.p_data;
-                //rr let a = CStr::from_ptr(video_frame.p_data);
-                //rr data = a.to_bytes();
+                let mut map = buffer.map_writable().unwrap();
+                let mut data = map.as_slice();
+                //data = &mut video_frame.p_data;
+                let a = CStr::from_ptr(video_frame.p_data);
+                data = a.to_bytes();
+                 */
 
             }
 
