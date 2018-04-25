@@ -147,7 +147,7 @@ impl NdiSrc {
             &caps,
         );
         klass.add_pad_template(src_pad_template);
-        
+
         // Install all our properties
         klass.install_properties(&PROPERTIES);
     }
@@ -238,32 +238,34 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
         let mut state = self.state.lock().unwrap();
         //let mut pNDI_recv = state.recv;
         unsafe {
-            //TODO Al inicializar el plugin
             if !NDIlib_initialize() {
-                //TODO delete exits
-                println!("Cannot run NDI: NDIlib_initialize error.");
-                ::std::process::exit(1);
+                //println!("Cannot run NDI: NDIlib_initialize error.");
+                gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_initialize error"]);
+                return false;
             }
 
-            //TODO valores por defecto
+            //TODO default values
             let NDI_find_create_desc: NDIlib_find_create_t = Default::default();
             let pNDI_find = NDIlib_find_create_v2(&NDI_find_create_desc);
             if pNDI_find.is_null() {
-                println!("Cannot run NDI: NDIlib_find_create_v2 error.");
-                ::std::process::exit(1);
+                //println!("Cannot run NDI: NDIlib_find_create_v2 error.");
+                gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_find_create_v2 error"]);
+                return false;
             }
 
             let mut no_sources: u32 = 0;
             let mut p_sources = ptr::null();
-            //TODO Evitar bloqueo
+            //TODO Delete while. If not, will loop until a source it's available
             while no_sources == 0 {
                 p_sources = NDIlib_find_get_current_sources(pNDI_find, &mut no_sources as *mut u32);
             }
 
             // We need at least one source
             if p_sources.is_null() {
-                println!("Error getting NDIlib_find_get_current_sources.");
-                ::std::process::exit(1);
+                //println!("Error getting NDIlib_find_get_current_sources.");
+                gst_element_error!(element, gst::CoreError::Negotiation, ["Error getting NDIlib_find_get_current_sources"]);
+                return false;
+                //::std::process::exit(1);
             }
 
             println!(
@@ -289,8 +291,10 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
 
             let pNDI_recv = NDIlib_recv_create_v3(&NDI_recv_create_desc);
             if pNDI_recv.is_null() {
-                println!("Cannot run NDI: NDIlib_recv_create_v3 error.");
-                ::std::process::exit(1);
+                //println!("Cannot run NDI: NDIlib_recv_create_v3 error.");
+                gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_recv_create_v3 error"]);
+                return false;
+                //::std::process::exit(1);
             }
 
             // Destroy the NDI finder. We needed to have access to the pointers to p_sources[0]
@@ -312,7 +316,7 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
 
             NDIlib_recv_send_metadata(pNDI_recv, &enable_hw_accel);
             state.recv = Some(NdiInstance{recv: pNDI_recv});
-            //TODO Otra opcion para guardar pNDI_recv es esta:
+            //TODO Another way to save NDI_recv variable
             // *state = State{
             //     info: state.info.clone(),
             //     recv: Some(NdiInstance{recv: pNDI_recv}),
@@ -341,7 +345,6 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
         _offset: u64,
         _length: u32,
     ) -> Result<gst::Buffer, gst::FlowReturn> {
-        println!("Principio create");
         // Keep a local copy of the values of all our properties at this very moment. This
         // ensures that the mutex is never locked for long and the application wouldn't
         // have to block until this function returns when getting/setting property values
@@ -358,8 +361,8 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
         };
         let recv = match state.recv{
             None => {
-                //TODO Cambiar gst_element_error por uno mas descriptivo
-                println!("pNDI_recv no encontrado");
+                //TODO Update gst_element_error with one more descriptive
+                //println!("pNDI_recv no encontrado");
                 gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
                 return Err(gst::FlowReturn::NotNegotiated);
             }
@@ -372,8 +375,8 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
             let video_frame: NDIlib_video_frame_v2_t = Default::default();
             let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
             let metadata_frame: NDIlib_metadata_frame_t = Default::default();
-            
-            //TODO Solo hacemos el buffer cuando tengamos un frame de video
+
+            //TODO Only create buffer when we got a video frame
             let mut frame = false;
             while !frame{
                 let frame_type = NDIlib_recv_capture_v2(
@@ -383,14 +386,18 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
                     &metadata_frame,
                     1000,
                 );
-                
+
                 match frame_type {
                     NDIlib_frame_type_e::NDIlib_frame_type_video => {
-                        println!("Tengo video {:?}", video_frame);
+                        //println!("Tengo video {:?}", video_frame);
+                        //TODO Change gst_warning to gst_debug
+                        gst_warning!(self.cat, obj: element, "Received video frame: {:?}", video_frame);
                         frame = true;
                     }
                     NDIlib_frame_type_e::NDIlib_frame_type_audio => {
                         println!("Tengo audio {:?}", audio_frame);
+                        //TODO Change gst_warning to gst_debug
+                        gst_debug!(self.cat, obj: element, "Received audio frame: {:?}", video_frame);
                     }
                     NDIlib_frame_type_e::NDIlib_frame_type_metadata => {
                         println!(
@@ -400,6 +407,8 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
                                 .to_string_lossy()
                                 .into_owned(),
                         );
+                        //TODO Change gst_warning to gst_debug
+                        gst_debug!(self.cat, obj: element, "Received metadata frame: {:?}", CStr::from_ptr(metadata_frame.p_data).to_string_lossy().into_owned(),);
                     }
                     NDIlib_frame_type_e::NDIlib_frame_type_error => {
                         println!(
@@ -409,48 +418,31 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
                                 .to_string_lossy()
                                 .into_owned(),
                         );
+                        //TODO Change gst_warning to gst_debug
+                        gst_debug!(self.cat, obj: element, "Received error frame: {:?}", CStr::from_ptr(metadata_frame.p_data).to_string_lossy().into_owned());
                         // break;
                     }
                     _ => println!("Tengo {:?}", frame_type),
                 }
             }
             // }
-            
 
 
-            //let mut buffer = gst::Buffer::from_slice(video_frame.p_data).unwrap();
-            let mut buffer = gst::Buffer::with_size(720 * 576 * 2).unwrap();
-
-            { 
-                let mut len = 720 * 576 * 2;
-                let mut vec = unsafe { Vec::from_raw_parts(video_frame.p_data as *mut u8, len, len) };
-                let mutbuffer = buffer.get_mut().unwrap();
-                mutbuffer.copy_from_slice(0, &vec).unwrap();
-
-            }
-            
-
-            
+            let buff_size = (video_frame.yres * video_frame.line_stride_in_bytes) as usize;
+            let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
             {
-                /*
+                let vec = Vec::from_raw_parts(video_frame.p_data as *mut u8, buff_size, buff_size);
+                //TODO Set pts, duration and other info about the buffer
+                // let pts: gst::ClockTime = (video_frame.timestamp as u64).into();
+                // let duration: gst::ClockTime = (334624).into();
                 let buffer = buffer.get_mut().unwrap();
-                //rr let pts: gst::ClockTime = (video_frame.timestamp as u64).into();
-                //rr let duration: gst::ClockTime = (334624).into();
-                //rr // buffer.set_pts(pts);
-                //rr //buffer.set_pts(pts);
-                //rr // buffer.set_duration(duration);
-                //rr // Map the buffer writable and create the actual samples
-                let mut map = buffer.map_writable().unwrap();
-                let mut data = map.as_slice();
-                //data = &mut video_frame.p_data;
-                let a = CStr::from_ptr(video_frame.p_data);
-                data = a.to_bytes();
-                 */
+                // buffer.set_pts(pts);
+                // buffer.set_duration(duration);
+                buffer.copy_from_slice(0, &vec).unwrap();
 
             }
 
             gst_debug!(self.cat, obj: element, "Produced buffer {:?}", buffer);
-            println!("Final create");
             Ok(buffer)
         }
     }
