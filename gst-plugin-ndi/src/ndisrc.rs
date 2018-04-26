@@ -15,6 +15,7 @@ use std::sync::Mutex;
 use std::{i32, u32};
 
 use std::ptr;
+use std::{thread, time};
 use std::ffi::{CStr, CString};
 
 use ndilib::*;
@@ -236,6 +237,9 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
 
         gst_warning!(self.cat, obj: element, "Starting");
         let mut state = self.state.lock().unwrap();
+        //let mut settings = self.settings.lock().unwrap();
+        let settings = self.settings.lock().unwrap();
+
         //let mut pNDI_recv = state.recv;
         unsafe {
             if !NDIlib_initialize() {
@@ -257,6 +261,8 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
             let mut p_sources = ptr::null();
             //TODO Delete while. If not, will loop until a source it's available
             while no_sources == 0 {
+                // TODO Sleep 1s to wait for all sources
+                thread::sleep(time::Duration::from_millis(1000));
                 p_sources = NDIlib_find_get_current_sources(pNDI_find, &mut no_sources as *mut u32);
             }
 
@@ -268,13 +274,30 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
                 //::std::process::exit(1);
             }
 
+            let mut source: isize = -1;
+            for i in 0..no_sources as isize{
+                if CStr::from_ptr((*p_sources.offset(i)).p_ndi_name)
+                    .to_string_lossy()
+                    .into_owned() == settings.stream_name{
+                        println!("coincide" );
+                        source = i;
+                        break;
+                }
+                else{
+                    println!("No coincide" );
+                    }
+                }
+            if source  == -1 {
+                gst_element_error!(element, gst::CoreError::Negotiation, ["Stream name not found"]);
+                return false;
+            }
             println!(
                 "no_source {}: Name '{}' Address '{}'",
                 no_sources,
-                CStr::from_ptr((*p_sources).p_ndi_name)
+                CStr::from_ptr((*p_sources.offset(source)).p_ndi_name)
                     .to_string_lossy()
                     .into_owned(),
-                CStr::from_ptr((*p_sources).p_ip_address)
+                CStr::from_ptr((*p_sources.offset(source)).p_ip_address)
                     .to_string_lossy()
                     .into_owned()
             );
@@ -395,9 +418,9 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
                         frame = true;
                     }
                     NDIlib_frame_type_e::NDIlib_frame_type_audio => {
-                        println!("Tengo audio {:?}", audio_frame);
+                        //println!("Tengo audio {:?}", audio_frame);
                         //TODO Change gst_warning to gst_debug
-                        gst_debug!(self.cat, obj: element, "Received audio frame: {:?}", video_frame);
+                        gst_warning!(self.cat, obj: element, "Received audio frame: {:?}", video_frame);
                     }
                     NDIlib_frame_type_e::NDIlib_frame_type_metadata => {
                         println!(

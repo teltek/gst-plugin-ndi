@@ -25,4 +25,6 @@ cargo build
 export GST_PLUGIN_PATH=`pwd`/target/debug
 gst-inspect-1.0 ndisrc
 GST_DEBUG=3 gst-launch-1.0 ndisrc ! video/x-raw, format=UYVY, width=720, height=576, framerate=1/25 ! videoconvert ! autovideosink
+
+GST_DEBUG=3 gst-launch-1.0 -v ndisrc stream-name="GC-DEV2 (Nombre_del_stream)" ! video/x-raw, format=UYVY, width=720, height=576, framerate=1/25 ! xvimagesink sync=false
 ```
