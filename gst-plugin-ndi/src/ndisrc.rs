@@ -68,6 +68,10 @@ struct ClockWait {
     clock_id: Option<gst::ClockId>,
     flushing: bool,
 }
+struct Pts{
+    pts: u64,
+    offset: u64,
+}
 
 // Struct containing all the element data
 struct NdiSrc {
@@ -75,6 +79,7 @@ struct NdiSrc {
     settings: Mutex<Settings>,
     state: Mutex<State>,
     clock_wait: Mutex<ClockWait>,
+    pts: Mutex<Pts>,
 }
 
 impl NdiSrc {
@@ -96,6 +101,10 @@ impl NdiSrc {
             clock_wait: Mutex::new(ClockWait {
                 clock_id: None,
                 flushing: true,
+            }),
+            pts: Mutex::new(Pts{
+                pts: 0,
+                offset: 0,
             }),
         })
     }
@@ -263,11 +272,11 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
             let mut no_sources: u32 = 0;
             let mut p_sources = ptr::null();
             //TODO Delete while. If not, will loop until a source it's available
-            while no_sources == 0 {
+            //while no_sources == 0 {
                 // TODO Sleep 1s to wait for all sources
-                thread::sleep(time::Duration::from_millis(1000));
+                thread::sleep(time::Duration::from_millis(2000));
                 p_sources = NDIlib_find_get_current_sources(pNDI_find, &mut no_sources as *mut u32);
-            }
+            //}
 
             // We need at least one source
             if p_sources.is_null() {
@@ -306,7 +315,7 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
             // it will still be provided in BGRA
             let p_ndi_name = CString::new("Galicaster NDI Receiver").unwrap();
             let NDI_recv_create_desc = NDIlib_recv_create_v3_t {
-                source_to_connect_to: *p_sources,
+                source_to_connect_to: *p_sources.offset(source),
                 p_ndi_name: p_ndi_name.as_ptr(),
                 ..Default::default()
             };
@@ -378,6 +387,7 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
         // have to block until this function returns when getting/setting property values
         let _settings = &*self.settings.lock().unwrap();
 
+        let mut pts2 = self.pts.lock().unwrap();
         // Get a locked reference to our state, i.e. the input and output AudioInfo
         let state = self.state.lock().unwrap();
         let _info = match state.info {
@@ -387,6 +397,8 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
             }
             Some(ref info) => info.clone(),
         };
+        //let mut pNDI_recva = ptr::null();
+        // {
         let recv = match state.recv{
             None => {
                 //TODO Update gst_element_error with one more descriptive
@@ -397,14 +409,15 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
             Some(ref recv) => recv.clone(),
         };
         let pNDI_recv = recv.recv;
+    // }
 
-        // let start_pts = match state.start_pts {
-        //     None => {
-        //         gst_element_error!(element, gst::CoreError::Negotiation, ["Have no caps yet"]);
-        //         return Err(gst::FlowReturn::NotNegotiated);
-        //     }
-        //     Some(ref start_pts) => start_pts.clone(),
-        // };
+        let start_pts = match state.start_pts {
+            None => {
+                gst_element_error!(element, gst::CoreError::Negotiation, ["Have no caps yet"]);
+                return Err(gst::FlowReturn::NotNegotiated);
+            }
+            Some(ref start_pts) => start_pts.clone(),
+        };
 
         unsafe{
             // loop {
@@ -426,15 +439,26 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
 
                 match frame_type {
                     NDIlib_frame_type_e::NDIlib_frame_type_video => {
-                        //println!("Tengo video {:?}", video_frame);
-                        //TODO Change gst_warning to gst_debug
                         gst_debug!(self.cat, obj: element, "Received video frame: {:?}", video_frame);
                         frame = true;
                         pts = ((video_frame.timestamp as u64) * 100) - state.start_pts.unwrap();
+                    //     println!("{:?}", pts/1000000);
+                    //     pts = (video_frame.timecode as u64) * 100;
+                    //     if pts2.pts == 0{
+                    //     pts2.pts = (video_frame.timecode as u64) * 100;
+                    //     pts = 0;
+                    //     }
+                    //     else{
+                    //     // println!("{:?}", video_frame.timecode * 100);
+                    //     // println!("{:?}", pts2.pts);
+                    //     pts = (((video_frame.timecode as u64) * 100) - pts2.pts);
+                    //     println!("{:?}", pts/1000000);
+                    //     println!("heuhuehue");
+                    //     // thread::sleep(time::Duration::from_millis(1000));
+                    // }
+
                     }
                     NDIlib_frame_type_e::NDIlib_frame_type_audio => {
-                        //println!("Tengo audio {:?}", audio_frame);
-                        //TODO Change gst_warning to gst_debug
                         gst_debug!(self.cat, obj: element, "Received audio frame: {:?}", video_frame);
                     }
                     NDIlib_frame_type_e::NDIlib_frame_type_metadata => {
@@ -472,10 +496,13 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
                 let vec = Vec::from_raw_parts(video_frame.p_data as *mut u8, buff_size, buff_size);
                 //TODO Set pts, duration and other info about the buffer
                 let pts: gst::ClockTime = (pts).into();
-                //let duration: gst::ClockTime = (334624).into();
+                let duration: gst::ClockTime = (40000000).into();
                 let buffer = buffer.get_mut().unwrap();
                 buffer.set_pts(pts);
-                //buffer.set_duration(duration);
+                buffer.set_duration(duration);
+                buffer.set_offset(pts2.offset);
+                buffer.set_offset_end(pts2.offset + 1);
+                pts2.offset = pts2.offset +1;
                 buffer.copy_from_slice(0, &vec).unwrap();
 
             }
