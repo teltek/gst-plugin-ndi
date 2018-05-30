@@ -441,21 +441,19 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
                     NDIlib_frame_type_e::NDIlib_frame_type_video => {
                         gst_debug!(self.cat, obj: element, "Received video frame: {:?}", video_frame);
                         frame = true;
-                        pts = ((video_frame.timestamp as u64) * 100) - state.start_pts.unwrap();
-                    //     println!("{:?}", pts/1000000);
-                    //     pts = (video_frame.timecode as u64) * 100;
-                    //     if pts2.pts == 0{
-                    //     pts2.pts = (video_frame.timecode as u64) * 100;
-                    //     pts = 0;
-                    //     }
-                    //     else{
-                    //     // println!("{:?}", video_frame.timecode * 100);
-                    //     // println!("{:?}", pts2.pts);
-                    //     pts = (((video_frame.timecode as u64) * 100) - pts2.pts);
-                    //     println!("{:?}", pts/1000000);
-                    //     println!("heuhuehue");
-                    //     // thread::sleep(time::Duration::from_millis(1000));
-                    // }
+                        //pts = ((video_frame.timestamp as u64) * 100) - state.start_pts.unwrap();
+                        // println!("{:?}", pts/1000000);
+                        pts = (video_frame.timecode as u64) * 100;
+                        if pts2.pts == 0{
+                        pts2.pts = (video_frame.timecode as u64) * 100;
+                        pts = 0;
+                        }
+                        else{
+                        // println!("{:?}", video_frame.timecode * 100);
+                        // println!("{:?}", pts2.pts);
+                        pts = (((video_frame.timecode as u64) * 100) - pts2.pts);
+                        //println!("{:?}", pts/1000000);
+                    }
 
                     }
                     NDIlib_frame_type_e::NDIlib_frame_type_audio => {
