@@ -25,22 +25,31 @@ use ndilib::*;
 #[derive(Debug, Clone)]
 struct Settings {
     stream_name: String,
+    ip: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Settings {
             stream_name: String::from("Fixed ndi stream name"),
+            ip: String::from(""),
         }
     }
 }
 
 // Metadata for the properties
-static PROPERTIES: [Property; 1] = [
+static PROPERTIES: [Property; 2] = [
     Property::String(
         "stream-name",
         "Sream Name",
         "Name of the streaming device",
+        None,
+        PropertyMutability::ReadWrite,
+    ),
+    Property::String(
+        "ip",
+        "Stream IP",
+        "Stream IP",
         None,
         PropertyMutability::ReadWrite,
     ),
@@ -192,6 +201,22 @@ impl ObjectImpl<BaseSrc> for NdiSrc {
 
                 let _ =
                     element.post_message(&gst::Message::new_latency().src(Some(&element)).build());
+            },
+            Property::String("ip", ..) => {
+                let mut settings = self.settings.lock().unwrap();
+                let ip = value.get().unwrap();
+                gst_warning!(
+                    self.cat,
+                    obj: &element,
+                    "Changing ip from {} to {}",
+                    settings.ip,
+                    ip
+                );
+                settings.ip = ip;
+                drop(settings);
+
+                let _ =
+                    element.post_message(&gst::Message::new_latency().src(Some(&element)).build());
             }
             _ => unimplemented!(),
         }
@@ -207,6 +232,11 @@ impl ObjectImpl<BaseSrc> for NdiSrc {
                 let settings = self.settings.lock().unwrap();
                 //TODO to_value supongo que solo funciona con numeros
                 Ok(settings.stream_name.to_value())
+            },
+            Property::UInt("ip", ..) => {
+                let settings = self.settings.lock().unwrap();
+                //TODO to_value supongo que solo funciona con numeros
+                Ok(settings.ip.to_value())
             }
             _ => unimplemented!(),
         }
@@ -260,22 +290,30 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
                 return false;
             }
 
+            let mut source: NDIlib_source_t = NDIlib_source_t{p_ndi_name: ptr::null(),
+                            p_ip_address: ptr::null()};
+
+            // print!("{:?}", settings.stream_name);
+            // print!("{:?}", settings.ip);
+
             //TODO default values
             let NDI_find_create_desc: NDIlib_find_create_t = Default::default();
             let pNDI_find = NDIlib_find_create_v2(&NDI_find_create_desc);
+            let ip_ptr = CString::new(settings.ip.clone()).unwrap();
+            if (ip_ptr == CString::new("").unwrap()){
             if pNDI_find.is_null() {
                 //println!("Cannot run NDI: NDIlib_find_create_v2 error.");
                 gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_find_create_v2 error"]);
                 return false;
             }
 
-            let mut no_sources: u32 = 0;
+            let mut total_sources: u32 = 0;
             let mut p_sources = ptr::null();
             //TODO Delete while. If not, will loop until a source it's available
-            //while no_sources == 0 {
+            //while total_sources == 0 {
                 // TODO Sleep 1s to wait for all sources
                 thread::sleep(time::Duration::from_millis(2000));
-                p_sources = NDIlib_find_get_current_sources(pNDI_find, &mut no_sources as *mut u32);
+                p_sources = NDIlib_find_get_current_sources(pNDI_find, &mut total_sources as *mut u32);
             //}
 
             // We need at least one source
@@ -286,36 +324,47 @@ impl BaseSrcImpl<BaseSrc> for NdiSrc {
                 //::std::process::exit(1);
             }
 
-            let mut source: isize = -1;
-            for i in 0..no_sources as isize{
+            let mut no_source: isize = -1;
+            for i in 0..total_sources as isize{
                 if CStr::from_ptr((*p_sources.offset(i)).p_ndi_name)
                     .to_string_lossy()
                     .into_owned() == settings.stream_name{
-                        source = i;
+                        no_source = i;
                         break;
                 }
             }
-            if source  == -1 {
+            if no_source  == -1 {
                 gst_element_error!(element, gst::CoreError::Negotiation, ["Stream name not found"]);
                 return false;
             }
             println!(
-                "no_source {}: Name '{}' Address '{}'",
-                no_sources,
-                CStr::from_ptr((*p_sources.offset(source)).p_ndi_name)
+                "Total_sources {}: Name '{}' Address '{}'",
+                total_sources,
+                CStr::from_ptr((*p_sources.offset(no_source)).p_ndi_name)
                     .to_string_lossy()
                     .into_owned(),
-                CStr::from_ptr((*p_sources.offset(source)).p_ip_address)
+                CStr::from_ptr((*p_sources.offset(no_source)).p_ip_address)
                     .to_string_lossy()
                     .into_owned()
             );
+            source = *p_sources.offset(no_source).clone();
+        }
+            else{
+            source.p_ip_address = ip_ptr.as_ptr();
+            println!(
+            "Address '{}'",
+            CStr::from_ptr(source.p_ip_address)
+                    .to_string_lossy()
+                    .into_owned()
+                );
+            }
 
             // We now have at least one source, so we create a receiver to look at it.
             // We tell it that we prefer YCbCr video since it is more efficient for us. If the source has an alpha channel
             // it will still be provided in BGRA
             let p_ndi_name = CString::new("Galicaster NDI Receiver").unwrap();
             let NDI_recv_create_desc = NDIlib_recv_create_v3_t {
-                source_to_connect_to: *p_sources.offset(source),
+                source_to_connect_to: source,
                 p_ndi_name: p_ndi_name.as_ptr(),
                 ..Default::default()
             };
