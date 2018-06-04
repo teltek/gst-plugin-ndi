@@ -15,7 +15,8 @@ extern "C" {
     pub fn NDIlib_recv_create_v3(
         p_create_settings: *const NDIlib_recv_create_v3_t,
     ) -> NDIlib_recv_instance_t;
-    pub fn NDIlib_find_destroy(p_instance: NDIlib_find_instance_t);
+    pub fn NDIlib_find_destroy(p_instance: NDIlib_recv_instance_t);
+    pub fn NDIlib_recv_destroy(p_instance: NDIlib_recv_instance_t);
     pub fn NDIlib_recv_set_tally(
         p_instance: NDIlib_recv_instance_t,
         p_tally: *const NDIlib_tally_t,

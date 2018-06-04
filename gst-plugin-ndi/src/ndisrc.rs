@@ -415,9 +415,23 @@ impl NdiSrc {
             // Called when shutting down the element so we can release all stream-related state
             fn stop(&self, element: &BaseSrc) -> bool {
                 // Reset state
-                *self.state.lock().unwrap() = Default::default();
+                let state = self.state.lock().unwrap();
+                let recv = match state.recv{
+                    None => {
+                        //println!("pNDI_recv no encontrado");
+                        gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
+                        return true;
+                    }
+                    Some(ref recv) => recv.clone(),
+                };
+                let pNDI_recv = recv.recv;
+                unsafe{
+                    NDIlib_recv_destroy(pNDI_recv);
+                    //NDIlib_destroy();
+                }
+                // Commented because when adding ndi destroy stopped in this line
+                //*self.state.lock().unwrap() = Default::default();
                 self.unlock(element);
-
                 gst_info!(self.cat, obj: element, "Stopped");
 
                 true
