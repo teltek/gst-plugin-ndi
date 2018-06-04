@@ -506,15 +506,15 @@ impl NdiSrc {
                                 frame = true;
                                 //pts = ((video_frame.timestamp as u64) * 100) - state.start_pts.unwrap();
                                 // println!("{:?}", pts/1000000);
-                                pts = (video_frame.timecode as u64) * 100;
+                                pts = (video_frame.timestamp as u64) * 100;
                                 if pts2.pts == 0{
-                                    pts2.pts = (video_frame.timecode as u64) * 100;
+                                    pts2.pts = (video_frame.timestamp as u64) * 100;
                                     pts = 0;
                                 }
                                 else{
                                     // println!("{:?}", video_frame.timecode * 100);
                                     // println!("{:?}", pts2.pts);
-                                    pts = (((video_frame.timecode as u64) * 100) - pts2.pts);
+                                    pts = (((video_frame.timestamp as u64) * 100) - pts2.pts);
                                     //println!("{:?}", pts/1000000);
                                 }
 
@@ -523,24 +523,24 @@ impl NdiSrc {
                                 gst_debug!(self.cat, obj: element, "Received audio frame: {:?}", video_frame);
                             }
                             NDIlib_frame_type_e::NDIlib_frame_type_metadata => {
-                                println!(
-                                    "Tengo metadata {} '{}'",
-                                    metadata_frame.length,
-                                    CStr::from_ptr(metadata_frame.p_data)
-                                    .to_string_lossy()
-                                    .into_owned(),
-                                );
+                                // println!(
+                                //     "Tengo metadata {} '{}'",
+                                //     metadata_frame.length,
+                                //     CStr::from_ptr(metadata_frame.p_data)
+                                //     .to_string_lossy()
+                                //     .into_owned(),
+                                // );
                                 //TODO Change gst_warning to gst_debug
                                 gst_debug!(self.cat, obj: element, "Received metadata frame: {:?}", CStr::from_ptr(metadata_frame.p_data).to_string_lossy().into_owned(),);
                             }
                             NDIlib_frame_type_e::NDIlib_frame_type_error => {
-                                println!(
-                                    "Tengo error {} '{}'",
-                                    metadata_frame.length,
-                                    CStr::from_ptr(metadata_frame.p_data)
-                                    .to_string_lossy()
-                                    .into_owned(),
-                                );
+                                // println!(
+                                //     "Tengo error {} '{}'",
+                                //     metadata_frame.length,
+                                //     CStr::from_ptr(metadata_frame.p_data)
+                                //     .to_string_lossy()
+                                //     .into_owned(),
+                                // );
                                 //TODO Change gst_warning to gst_debug
                                 gst_debug!(self.cat, obj: element, "Received error frame: {:?}", CStr::from_ptr(metadata_frame.p_data).to_string_lossy().into_owned());
                                 // break;
