@@ -5,6 +5,7 @@ use gst;
 use gst::prelude::*;
 use gst_video;
 use gst_base::prelude::*;
+use gst::Fraction;
 
 use gst_plugin::base_src::*;
 use gst_plugin::element::*;
@@ -144,6 +145,7 @@ impl NdiSrc {
             (
                 "format",
                 &gst::List::new(&[
+                    //TODO add all formats?
                     &gst_video::VideoFormat::Uyvy.to_string(),
                     //&gst_video::VideoFormat::Rgb.to_string(),
                     //&gst_video::VideoFormat::Gray8.to_string(),
@@ -167,6 +169,7 @@ impl NdiSrc {
                 gst::PadDirection::Src,
                 gst::PadPresence::Always,
                 &caps,
+                //&gst::Caps::new_any(),
             );
             klass.add_pad_template(src_pad_template);
 
@@ -245,6 +248,75 @@ impl NdiSrc {
 
     // Virtual methods of gst::Element. We override none
     impl ElementImpl<BaseSrc> for NdiSrc {
+    }
+
+    fn get_frame(ndisrc_struct: &NdiSrc, element: &BaseSrc, pNDI_recv : NDIlib_recv_instance_t, pts2 : &mut u64, pts : &mut u64) -> NDIlib_video_frame_v2_t{
+        unsafe{
+            let video_frame: NDIlib_video_frame_v2_t = Default::default();
+            let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
+            let metadata_frame: NDIlib_metadata_frame_t = Default::default();
+
+            //TODO Only create buffer when we got a video frame
+            let mut frame = false;
+            while !frame{
+            let frame_type = NDIlib_recv_capture_v2(
+                pNDI_recv,
+                &video_frame,
+                ptr::null(),
+                ptr::null(),
+                1000,
+            );
+
+            match frame_type {
+                NDIlib_frame_type_e::NDIlib_frame_type_video => {
+                    gst_debug!(ndisrc_struct.cat, obj: element, "Received video frame: {:?}", video_frame);
+                    frame = true;
+                    //pts = ((video_frame.timestamp as u64) * 100) - state.start_pts.unwrap();
+                    // println!("{:?}", pts/1000000);
+                    *pts = ((video_frame.timestamp as u64) * 100);
+                    if *pts2 == 0{
+                        *pts2 = (video_frame.timestamp as u64) * 100;
+                        *pts = 0;
+                    }
+                    else{
+                        // println!("{:?}", video_frame.timecode * 100);
+                        // println!("{:?}", pts2.pts);
+                        *pts = (((video_frame.timestamp as u64) * 100) - *pts2);
+                        //println!("{:?}", pts/1000000);
+                    }
+
+                }
+                NDIlib_frame_type_e::NDIlib_frame_type_audio => {
+                    gst_debug!(ndisrc_struct.cat, obj: element, "Received audio frame: {:?}", video_frame);
+                }
+                NDIlib_frame_type_e::NDIlib_frame_type_metadata => {
+                    // println!(
+                    //     "Tengo metadata {} '{}'",
+                    //     metadata_frame.length,
+                    //     CStr::from_ptr(metadata_frame.p_data)
+                    //     .to_string_lossy()
+                    //     .into_owned(),
+                    // );
+                    //TODO Change gst_warning to gst_debug
+                    gst_debug!(ndisrc_struct.cat, obj: element, "Received metadata frame: {:?}", CStr::from_ptr(metadata_frame.p_data).to_string_lossy().into_owned(),);
+                }
+                NDIlib_frame_type_e::NDIlib_frame_type_error => {
+                    // println!(
+                    //     "Tengo error {} '{}'",
+                    //     metadata_frame.length,
+                    //     CStr::from_ptr(metadata_frame.p_data)
+                    //     .to_string_lossy()
+                    //     .into_owned(),
+                    // );
+                    //TODO Change gst_warning to gst_debug
+                    gst_debug!(ndisrc_struct.cat, obj: element, "Received error frame: {:?}", CStr::from_ptr(metadata_frame.p_data).to_string_lossy().into_owned());
+                    // break;
+                }
+                _ => println!("Tengo {:?}", frame_type),
+            }
+             }
+            return video_frame;
+        }
     }
 
     // Virtual methods of gst_base::BaseSrc
@@ -483,72 +555,97 @@ impl NdiSrc {
                 };
 
                 unsafe{
-                    // loop {
-                    let video_frame: NDIlib_video_frame_v2_t = Default::default();
+                    // // loop {
+                    let mut pts: u64 = 0;
+                    let video_frame: NDIlib_video_frame_v2_t = get_frame(self, element, pNDI_recv, &mut pts2.pts, &mut pts);
                     let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
                     let metadata_frame: NDIlib_metadata_frame_t = Default::default();
+                    //video_frame = get_frame(self, element, pNDI_recv, pts2.pts);
 
-                    //TODO Only create buffer when we got a video frame
-                    let mut frame = false;
-                    let mut pts: u64 = 0;
-                    while !frame{
-                        let frame_type = NDIlib_recv_capture_v2(
-                            pNDI_recv,
-                            &video_frame,
-                            &audio_frame,
-                            &metadata_frame,
-                            1000,
-                        );
-
-                        match frame_type {
-                            NDIlib_frame_type_e::NDIlib_frame_type_video => {
-                                gst_debug!(self.cat, obj: element, "Received video frame: {:?}", video_frame);
-                                frame = true;
-                                //pts = ((video_frame.timestamp as u64) * 100) - state.start_pts.unwrap();
-                                // println!("{:?}", pts/1000000);
-                                pts = (video_frame.timestamp as u64) * 100;
-                                if pts2.pts == 0{
-                                    pts2.pts = (video_frame.timestamp as u64) * 100;
-                                    pts = 0;
-                                }
-                                else{
-                                    // println!("{:?}", video_frame.timecode * 100);
-                                    // println!("{:?}", pts2.pts);
-                                    pts = (((video_frame.timestamp as u64) * 100) - pts2.pts);
-                                    //println!("{:?}", pts/1000000);
-                                }
-
-                            }
-                            NDIlib_frame_type_e::NDIlib_frame_type_audio => {
-                                gst_debug!(self.cat, obj: element, "Received audio frame: {:?}", video_frame);
-                            }
-                            NDIlib_frame_type_e::NDIlib_frame_type_metadata => {
-                                // println!(
-                                //     "Tengo metadata {} '{}'",
-                                //     metadata_frame.length,
-                                //     CStr::from_ptr(metadata_frame.p_data)
-                                //     .to_string_lossy()
-                                //     .into_owned(),
-                                // );
-                                //TODO Change gst_warning to gst_debug
-                                gst_debug!(self.cat, obj: element, "Received metadata frame: {:?}", CStr::from_ptr(metadata_frame.p_data).to_string_lossy().into_owned(),);
-                            }
-                            NDIlib_frame_type_e::NDIlib_frame_type_error => {
-                                // println!(
-                                //     "Tengo error {} '{}'",
-                                //     metadata_frame.length,
-                                //     CStr::from_ptr(metadata_frame.p_data)
-                                //     .to_string_lossy()
-                                //     .into_owned(),
-                                // );
-                                //TODO Change gst_warning to gst_debug
-                                gst_debug!(self.cat, obj: element, "Received error frame: {:?}", CStr::from_ptr(metadata_frame.p_data).to_string_lossy().into_owned());
-                                // break;
-                            }
-                            _ => println!("Tengo {:?}", frame_type),
-                        }
-                    }
+                    // //TODO Only create buffer when we got a video frame
+                    // let mut frame = false;
+                    // let mut pts: u64 = 0;
+                    // while !frame{
+                    //     let frame_type = NDIlib_recv_capture_v2(
+                    //         pNDI_recv,
+                    //         &video_frame,
+                    //         &audio_frame,
+                    //         &metadata_frame,
+                    //         1000,
+                    //     );
+                    //
+                    //     match frame_type {
+                    //         NDIlib_frame_type_e::NDIlib_frame_type_video => {
+                    //             gst_debug!(self.cat, obj: element, "Received video frame: {:?}", video_frame);
+                    //             frame = true;
+                    //             //pts = ((video_frame.timestamp as u64) * 100) - state.start_pts.unwrap();
+                    //             // println!("{:?}", pts/1000000);
+                    //             pts = (video_frame.timestamp as u64) * 100;
+                    //             if pts2.pts == 0{
+                    //                 pts2.pts = (video_frame.timestamp as u64) * 100;
+                    //                 pts = 0;
+                    //                 //let mut caps = _info.to_caps();
+                    //                 // let s = caps.get_mut_structure(0).unwrap();
+                    //                 // s.fixate_field_nearest_int("width", 1500);
+                    //                 // s.fixate_field_nearest_int("framerate", 25/1);
+                    //                 // self.set_caps(&self, s);
+                    //                 // let mut caps = Some(gst::Caps::new_simple(
+                    //                 //     "video/x-raw",
+                    //                 //     &[("format",
+                    //                 //         &gst_video::VideoFormat::Uyvy.to_string()
+                    //                 //     )],
+                    //                 // ));
+                    //                 // caps.as_mut().map(|c| {
+                    //                 //     c.get_mut()
+                    //                 //     .unwrap()
+                    //                 //     .set_simple(&[("framerate", &(25/1 as i32)), ("width", &(1600 as i32)), ("height", &(1200 as i32))])
+                    //                 // });
+                    //                 //caps.unwrap().set_simple(&[("framerate", &(20/1 as i32))]);
+                    //                 //let mut caps2 = _info.to_caps().unwrap();
+                    //                 // println!("{:?}", caps);
+                    //                 //element.parent_set_caps(&caps.unwrap());
+                    //                 //element.parent_fixate(caps.unwrap());
+                    //                 //gst_video::VideoInfo::from_caps(&caps.unwrap());
+                    //                 //self.set_caps(element, &caps.unwrap());
+                    //             }
+                    //             else{
+                    //                 // println!("{:?}", video_frame.timecode * 100);
+                    //                 // println!("{:?}", pts2.pts);
+                    //                 pts = (((video_frame.timestamp as u64) * 100) - pts2.pts);
+                    //                 //println!("{:?}", pts/1000000);
+                    //             }
+                    //
+                    //         }
+                    //         NDIlib_frame_type_e::NDIlib_frame_type_audio => {
+                    //             gst_debug!(self.cat, obj: element, "Received audio frame: {:?}", video_frame);
+                    //         }
+                    //         NDIlib_frame_type_e::NDIlib_frame_type_metadata => {
+                    //             // println!(
+                    //             //     "Tengo metadata {} '{}'",
+                    //             //     metadata_frame.length,
+                    //             //     CStr::from_ptr(metadata_frame.p_data)
+                    //             //     .to_string_lossy()
+                    //             //     .into_owned(),
+                    //             // );
+                    //             //TODO Change gst_warning to gst_debug
+                    //             gst_debug!(self.cat, obj: element, "Received metadata frame: {:?}", CStr::from_ptr(metadata_frame.p_data).to_string_lossy().into_owned(),);
+                    //         }
+                    //         NDIlib_frame_type_e::NDIlib_frame_type_error => {
+                    //             // println!(
+                    //             //     "Tengo error {} '{}'",
+                    //             //     metadata_frame.length,
+                    //             //     CStr::from_ptr(metadata_frame.p_data)
+                    //             //     .to_string_lossy()
+                    //             //     .into_owned(),
+                    //             // );
+                    //             //TODO Change gst_warning to gst_debug
+                    //             gst_debug!(self.cat, obj: element, "Received error frame: {:?}", CStr::from_ptr(metadata_frame.p_data).to_string_lossy().into_owned());
+                    //             // break;
+                    //         }
+                    //         _ => println!("Tengo {:?}", frame_type),
+                    //     }
                     // }
+                    // // }
 
 
                     let buff_size = (video_frame.yres * video_frame.line_stride_in_bytes) as usize;
