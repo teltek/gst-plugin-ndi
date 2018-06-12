@@ -509,6 +509,41 @@ impl NdiSrc {
                 true
             }
 
+            fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
+                //We need to set the correct caps resolution and framerate
+                let state = self.state.lock().unwrap();
+                let recv = match state.recv{
+                    None => {
+                        //TODO Update gst_element_error with one more descriptive
+                        //println!("pNDI_recv no encontrado");
+                        gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
+                        //TODO if none not return anything
+                        return caps;
+                    }
+                    Some(ref recv) => recv.clone(),
+                };
+
+                let pNDI_recv = recv.recv;
+                let mut pts2 = self.pts.lock().unwrap();
+                let mut pts: u64 = 0;
+
+                let video_frame: NDIlib_video_frame_v2_t = get_frame(self, element, pNDI_recv, &mut pts2.pts, &mut pts);
+                let mut caps = gst::Caps::truncate(caps);
+                {
+                    let caps = caps.make_mut();
+                    let s = caps.get_mut_structure(0).unwrap();
+                    s.fixate_field_nearest_int("width", video_frame.xres);
+                    s.fixate_field_nearest_int("height", video_frame.yres);
+                    s.fixate_field_nearest_fraction("framerate", Fraction::new(video_frame.frame_rate_N, video_frame.frame_rate_D));
+                    //s.fixate_field_str("format", &gst_video::VideoFormat::Rgb.to_string());
+                    //caps.set_simple(&[("width", &(1600 as i32))]);
+                    //s.set_value("width", &(1600 as i32));
+                }
+
+                // Let BaseSrc fixate anything else for us. We could've alternatively have
+                // called Caps::fixate() here
+                element.parent_fixate(caps)
+            }
 
             //Creates the audio buffers
             fn create(
