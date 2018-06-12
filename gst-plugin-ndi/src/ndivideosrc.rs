@@ -84,7 +84,7 @@ struct Pts{
 }
 
 // Struct containing all the element data
-struct NdiSrc {
+struct NdiVideoSrc {
     cat: gst::DebugCategory,
     settings: Mutex<Settings>,
     state: Mutex<State>,
@@ -92,7 +92,7 @@ struct NdiSrc {
     pts: Mutex<Pts>,
 }
 
-impl NdiSrc {
+impl NdiVideoSrc {
     // Called when a new instance is to be created
     fn new(element: &BaseSrc) -> Box<BaseSrcImpl<BaseSrc>> {
         // Initialize live-ness and notify the base class that
@@ -102,9 +102,9 @@ impl NdiSrc {
 
         Box::new(Self {
             cat: gst::DebugCategory::new(
-                "ndisrc",
+                "ndivideosrc",
                 gst::DebugColorFlags::empty(),
-                "NewTek NDI Source",
+                "NewTek NDI Video Source",
             ),
             settings: Mutex::new(Default::default()),
             state: Mutex::new(Default::default()),
@@ -131,7 +131,7 @@ impl NdiSrc {
     // Our element here can output f32 and f64
     fn class_init(klass: &mut BaseSrcClass) {
         klass.set_metadata(
-            "NewTek NDI Source",
+            "NewTek NDI Video Source",
             "Source",
             "NewTek NDI video/audio source",
             "Ruben Gonzalez <rubenrua@teltek.es>",
@@ -181,7 +181,7 @@ impl NdiSrc {
 
 
     // Virtual methods of GObject itself
-    impl ObjectImpl<BaseSrc> for NdiSrc {
+    impl ObjectImpl<BaseSrc> for NdiVideoSrc {
         // Called whenever a value of a property is changed. It can be called
         // at any time from any thread.
         fn set_property(&self, obj: &glib::Object, id: u32, value: &glib::Value) {
@@ -231,12 +231,12 @@ impl NdiSrc {
             let prop = &PROPERTIES[id as usize];
 
             match *prop {
-                Property::UInt("stream-name", ..) => {
+                Property::String("stream-name", ..) => {
                     let settings = self.settings.lock().unwrap();
                     //TODO to_value supongo que solo funciona con numeros
                     Ok(settings.stream_name.to_value())
                 },
-                Property::UInt("ip", ..) => {
+                Property::String("ip", ..) => {
                     let settings = self.settings.lock().unwrap();
                     //TODO to_value supongo que solo funciona con numeros
                     Ok(settings.ip.to_value())
@@ -247,10 +247,10 @@ impl NdiSrc {
     }
 
     // Virtual methods of gst::Element. We override none
-    impl ElementImpl<BaseSrc> for NdiSrc {
+    impl ElementImpl<BaseSrc> for NdiVideoSrc {
     }
 
-    fn get_frame(ndisrc_struct: &NdiSrc, element: &BaseSrc, pNDI_recv : NDIlib_recv_instance_t, pts2 : &mut u64, pts : &mut u64) -> NDIlib_video_frame_v2_t{
+    fn get_frame(ndisrc_struct: &NdiVideoSrc, element: &BaseSrc, pNDI_recv : NDIlib_recv_instance_t, pts2 : &mut u64, pts : &mut u64) -> NDIlib_video_frame_v2_t{
         unsafe{
             let video_frame: NDIlib_video_frame_v2_t = Default::default();
             let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
@@ -320,7 +320,7 @@ impl NdiSrc {
     }
 
     // Virtual methods of gst_base::BaseSrc
-    impl BaseSrcImpl<BaseSrc> for NdiSrc {
+    impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
         // Called whenever the input/output caps are changing, i.e. in the very beginning before data
         // flow happens and whenever the situation in the pipeline is changing. All buffers after this
         // call have the caps given here.
@@ -737,29 +737,29 @@ impl NdiSrc {
         // same code would use this struct to store information about the concrete element. An example of
         // this would be a plugin that wraps around a library that has multiple decoders with the same API,
         // but wants (as it should) a separate element registered for each decoder.
-        struct NdiSrcStatic;
+        struct NdiVideoSrcStatic;
 
         // The basic trait for registering the type: This returns a name for the type and registers the
         // instance and class initializations functions with the type system, thus hooking everything
         // together.
-        impl ImplTypeStatic<BaseSrc> for NdiSrcStatic {
+        impl ImplTypeStatic<BaseSrc> for NdiVideoSrcStatic {
             fn get_name(&self) -> &str {
-                "NdiSrc"
+                "NdiVideoSrc"
             }
 
             fn new(&self, element: &BaseSrc) -> Box<BaseSrcImpl<BaseSrc>> {
-                NdiSrc::new(element)
+                NdiVideoSrc::new(element)
             }
 
             fn class_init(&self, klass: &mut BaseSrcClass) {
-                NdiSrc::class_init(klass);
+                NdiVideoSrc::class_init(klass);
             }
         }
 
         // Registers the type for our element, and then registers in GStreamer under
-        // the name "ndisrc" for being able to instantiate it via e.g.
+        // the name NdiVideoSrc for being able to instantiate it via e.g.
         // gst::ElementFactory::make().
         pub fn register(plugin: &gst::Plugin) {
-            let type_ = register_type(NdiSrcStatic);
-            gst::Element::register(plugin, "ndisrc", 0, type_);
+            let type_ = register_type(NdiVideoSrcStatic);
+            gst::Element::register(plugin, "ndivideosrc", 0, type_);
         }

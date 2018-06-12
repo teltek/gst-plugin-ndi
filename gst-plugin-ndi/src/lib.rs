@@ -18,13 +18,15 @@ extern crate gstreamer_video as gst_video;
 extern crate byte_slice_cast;
 extern crate num_traits;
 
-mod ndisrc;
+mod ndivideosrc;
+mod ndiaudiosrc;
 pub mod ndilib;
 
 // Plugin entry point that should register all elements provided by this plugin,
 // and everything else that this plugin might provide (e.g. typefinders or device providers).
 fn plugin_init(plugin: &gst::Plugin) -> bool {
-    ndisrc::register(plugin);
+    ndivideosrc::register(plugin);
+    ndiaudiosrc::register(plugin);
     true
 }
 
