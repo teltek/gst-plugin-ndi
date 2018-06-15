@@ -684,11 +684,12 @@ impl NdiVideoSrc {
 
 
                     let buff_size = (video_frame.yres * video_frame.line_stride_in_bytes) as usize;
+                    println!("{:?}", buff_size);
                     let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
                     {
                         let vec = Vec::from_raw_parts(video_frame.p_data as *mut u8, buff_size, buff_size);
-                        //TODO Set pts, duration and other info about the buffer
                         let pts: gst::ClockTime = (pts).into();
+                        //TODO get duration
                         let duration: gst::ClockTime = (40000000).into();
                         let buffer = buffer.get_mut().unwrap();
                         buffer.set_pts(pts);
