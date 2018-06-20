@@ -32,10 +32,6 @@ extern "C" {
         p_metadata: *const NDIlib_metadata_frame_t,
         timeout_in_ms: u32,
     ) -> NDIlib_frame_type_e;
-    pub fn NDIlib_util_audio_to_interleaved_16s_v2(
-        p_src: *const NDIlib_audio_frame_v2_t,
-        p_dst: *const NDIlib_audio_frame_interleaved_16s_t,
-    ) -> NDIlib_audio_frame_interleaved_16s_t;
 }
 
 pub type NDIlib_find_instance_t = *mut ::std::os::raw::c_void;
@@ -254,30 +250,6 @@ impl Default for NDIlib_audio_frame_v2_t {
             channel_stride_in_bytes: 0,
             p_metadata: ptr::null(),
             timestamp: NDIlib_send_timecode_empty,
-        }
-    }
-}
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct NDIlib_audio_frame_interleaved_16s_t {
-    pub sample_rate: ::std::os::raw::c_int,
-    pub no_channels: ::std::os::raw::c_int,
-    pub no_samples: ::std::os::raw::c_int,
-    pub timecode: i64,
-    pub p_data: *const ::std::os::raw::c_short,
-    pub reference_level: ::std::os::raw::c_int,
-}
-
-impl Default for NDIlib_audio_frame_interleaved_16s_t {
-    fn default() -> Self {
-        NDIlib_audio_frame_interleaved_16s_t {
-            sample_rate: 48000,
-            no_channels: 2,
-            no_samples: 0,
-            timecode: NDIlib_send_timecode_synthesize,
-            p_data: ptr::null(),
-            reference_level: 20,
         }
     }
 }
