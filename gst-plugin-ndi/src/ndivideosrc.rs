@@ -21,6 +21,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::ffi::{CStr, CString};
 
 use ndilib::*;
+use hue;
+use ndi2;
+use stop_ndi;
 
 // Property value storage
 #[derive(Debug, Clone)]
@@ -133,8 +136,8 @@ impl NdiVideoSrc {
         klass.set_metadata(
             "NewTek NDI Video Source",
             "Source",
-            "NewTek NDI video/audio source",
-            "Ruben Gonzalez <rubenrua@teltek.es>",
+            "NewTek NDI video source",
+            "Ruben Gonzalez <rubenrua@teltek.es>, Daniel Vilar <daniel.peiteado@teltek.es>",
         );
 
         // On the src pad, we can produce F32/F64 with any sample rate
@@ -273,15 +276,20 @@ impl NdiVideoSrc {
                         frame = true;
                         //pts = ((video_frame.timestamp as u64) * 100) - state.start_pts.unwrap();
                         // println!("{:?}", pts/1000000);
-                        *pts = ((video_frame.timestamp as u64) * 100);
+                        // println!("{:?}", video_frame.timestamp);
+                        // println!("{:?}", video_frame.timecode);
+                        //*pts = ((video_frame.timestamp as u64) * 100);
+                        *pts = ((video_frame.timecode as u64) * 100);
                         if *pts2 == 0{
-                            *pts2 = (video_frame.timestamp as u64) * 100;
+                            // *pts2 = (video_frame.timestamp as u64) * 100;
+                            *pts2 = (video_frame.timecode as u64) * 100;
                             *pts = 0;
                         }
                         else{
                             // println!("{:?}", video_frame.timecode * 100);
                             // println!("{:?}", pts2.pts);
-                            *pts = (((video_frame.timestamp as u64) * 100) - *pts2);
+                            //*pts = (((video_frame.timestamp as u64) * 100) - *pts2);
+                            *pts = (((video_frame.timecode as u64) * 100) - *pts2);
                             //println!("{:?}", pts/1000000);
                         }
 
@@ -356,151 +364,162 @@ impl NdiVideoSrc {
 
             //let mut pNDI_recv = state.recv;
             unsafe {
-                if !NDIlib_initialize() {
-                    //println!("Cannot run NDI: NDIlib_initialize error.");
-                    gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_initialize error"]);
-                    return false;
+                return hue(element, settings.ip.clone(), settings.stream_name.clone());
+                // if !NDIlib_initialize() {
+                //     //println!("Cannot run NDI: NDIlib_initialize error.");
+                //     gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_initialize error"]);
+                //     return false;
+                // }
+                //
+                // let mut source: NDIlib_source_t = NDIlib_source_t{p_ndi_name: ptr::null(),
+                //     p_ip_address: ptr::null()};
+                //
+                //     // print!("{:?}", settings.stream_name);
+                //     // print!("{:?}", settings.ip);
+                //
+                //     //TODO default values
+                //     let NDI_find_create_desc: NDIlib_find_create_t = Default::default();
+                //     let pNDI_find = NDIlib_find_create_v2(&NDI_find_create_desc);
+                //     let ip_ptr = CString::new(settings.ip.clone()).unwrap();
+                //     if (ip_ptr == CString::new("").unwrap()){
+                //         if pNDI_find.is_null() {
+                //             //println!("Cannot run NDI: NDIlib_find_create_v2 error.");
+                //             gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_find_create_v2 error"]);
+                //             return false;
+                //         }
+                //
+                //         let mut total_sources: u32 = 0;
+                //         let mut p_sources = ptr::null();
+                //         //TODO Delete while. If not, will loop until a source it's available
+                //         //while total_sources == 0 {
+                //         // TODO Sleep 1s to wait for all sources
+                //         thread::sleep(time::Duration::from_millis(2000));
+                //         p_sources = NDIlib_find_get_current_sources(pNDI_find, &mut total_sources as *mut u32);
+                //         //}
+                //
+                //         // We need at least one source
+                //         if p_sources.is_null() {
+                //             //println!("Error getting NDIlib_find_get_current_sources.");
+                //             gst_element_error!(element, gst::CoreError::Negotiation, ["Error getting NDIlib_find_get_current_sources"]);
+                //             return false;
+                //             //::std::process::exit(1);
+                //         }
+                //
+                //         let mut no_source: isize = -1;
+                //         for i in 0..total_sources as isize{
+                //             if CStr::from_ptr((*p_sources.offset(i)).p_ndi_name)
+                //             .to_string_lossy()
+                //             .into_owned() == settings.stream_name{
+                //                 no_source = i;
+                //                 break;
+                //             }
+                //         }
+                //         if no_source  == -1 {
+                //             gst_element_error!(element, gst::CoreError::Negotiation, ["Stream name not found"]);
+                //             return false;
+                //         }
+                //         println!(
+                //             "Total_sources {}: Name '{}' Address '{}'",
+                //             total_sources,
+                //             CStr::from_ptr((*p_sources.offset(no_source)).p_ndi_name)
+                //             .to_string_lossy()
+                //             .into_owned(),
+                //             CStr::from_ptr((*p_sources.offset(no_source)).p_ip_address)
+                //             .to_string_lossy()
+                //             .into_owned()
+                //         );
+                //         source = *p_sources.offset(no_source).clone();
+                //     }
+                //     else{
+                //         source.p_ip_address = ip_ptr.as_ptr();
+                //         println!(
+                //             "Address '{}'",
+                //             CStr::from_ptr(source.p_ip_address)
+                //             .to_string_lossy()
+                //             .into_owned()
+                //         );
+                //     }
+                //
+                //     // We now have at least one source, so we create a receiver to look at it.
+                //     // We tell it that we prefer YCbCr video since it is more efficient for us. If the source has an alpha channel
+                //     // it will still be provided in BGRA
+                //     let p_ndi_name = CString::new("Galicaster NDI Receiver").unwrap();
+                //     let NDI_recv_create_desc = NDIlib_recv_create_v3_t {
+                //         source_to_connect_to: source,
+                //         p_ndi_name: p_ndi_name.as_ptr(),
+                //         ..Default::default()
+                //     };
+                //
+                //     let pNDI_recv = NDIlib_recv_create_v3(&NDI_recv_create_desc);
+                //     if pNDI_recv.is_null() {
+                //         //println!("Cannot run NDI: NDIlib_recv_create_v3 error.");
+                //         gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_recv_create_v3 error"]);
+                //         return false;
+                //         //::std::process::exit(1);
+                //     }
+                //
+                //     // Destroy the NDI finder. We needed to have access to the pointers to p_sources[0]
+                //     NDIlib_find_destroy(pNDI_find);
+                //
+                //     // We are now going to mark this source as being on program output for tally purposes (but not on preview)
+                //     let tally_state: NDIlib_tally_t = Default::default();
+                //     NDIlib_recv_set_tally(pNDI_recv, &tally_state);
+                //
+                //     // Enable Hardwqre Decompression support if this support has it. Please read the caveats in the documentation
+                //     // regarding this. There are times in which it might reduce the performance although on small stream numbers
+                //     // it almost always yields the same or better performance.
+                //     let data = CString::new("<ndi_hwaccel enabled=\"true\"/>").unwrap();
+                //     let enable_hw_accel = NDIlib_metadata_frame_t {
+                //         length: data.to_bytes().len() as i32,
+                //         timecode: 0,
+                //         p_data: data.as_ptr(),
+                //     };
+                //
+                //     NDIlib_recv_send_metadata(pNDI_recv, &enable_hw_accel);
+                //     state.recv = Some(NdiInstance{recv: pNDI_recv});
+                //     let start = SystemTime::now();
+                //     let since_the_epoch = start.duration_since(UNIX_EPOCH)
+                //     .expect("Time went backwards");
+                //     println!("{:?}", since_the_epoch);
+                //     state.start_pts = Some(since_the_epoch.as_secs() * 1000000000 +
+                //     since_the_epoch.subsec_nanos() as u64);
+                //     //TODO Another way to save NDI_recv variable
+                //     // *state = State{
+                //     //     info: state.info.clone(),
+                //     //     recv: Some(NdiInstance{recv: pNDI_recv}),
+                //     // };
                 }
 
-                let mut source: NDIlib_source_t = NDIlib_source_t{p_ndi_name: ptr::null(),
-                    p_ip_address: ptr::null()};
-
-                    // print!("{:?}", settings.stream_name);
-                    // print!("{:?}", settings.ip);
-
-                    //TODO default values
-                    let NDI_find_create_desc: NDIlib_find_create_t = Default::default();
-                    let pNDI_find = NDIlib_find_create_v2(&NDI_find_create_desc);
-                    let ip_ptr = CString::new(settings.ip.clone()).unwrap();
-                    if (ip_ptr == CString::new("").unwrap()){
-                        if pNDI_find.is_null() {
-                            //println!("Cannot run NDI: NDIlib_find_create_v2 error.");
-                            gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_find_create_v2 error"]);
-                            return false;
-                        }
-
-                        let mut total_sources: u32 = 0;
-                        let mut p_sources = ptr::null();
-                        //TODO Delete while. If not, will loop until a source it's available
-                        //while total_sources == 0 {
-                        // TODO Sleep 1s to wait for all sources
-                        thread::sleep(time::Duration::from_millis(2000));
-                        p_sources = NDIlib_find_get_current_sources(pNDI_find, &mut total_sources as *mut u32);
-                        //}
-
-                        // We need at least one source
-                        if p_sources.is_null() {
-                            //println!("Error getting NDIlib_find_get_current_sources.");
-                            gst_element_error!(element, gst::CoreError::Negotiation, ["Error getting NDIlib_find_get_current_sources"]);
-                            return false;
-                            //::std::process::exit(1);
-                        }
-
-                        let mut no_source: isize = -1;
-                        for i in 0..total_sources as isize{
-                            if CStr::from_ptr((*p_sources.offset(i)).p_ndi_name)
-                            .to_string_lossy()
-                            .into_owned() == settings.stream_name{
-                                no_source = i;
-                                break;
-                            }
-                        }
-                        if no_source  == -1 {
-                            gst_element_error!(element, gst::CoreError::Negotiation, ["Stream name not found"]);
-                            return false;
-                        }
-                        println!(
-                            "Total_sources {}: Name '{}' Address '{}'",
-                            total_sources,
-                            CStr::from_ptr((*p_sources.offset(no_source)).p_ndi_name)
-                            .to_string_lossy()
-                            .into_owned(),
-                            CStr::from_ptr((*p_sources.offset(no_source)).p_ip_address)
-                            .to_string_lossy()
-                            .into_owned()
-                        );
-                        source = *p_sources.offset(no_source).clone();
-                    }
-                    else{
-                        source.p_ip_address = ip_ptr.as_ptr();
-                        println!(
-                            "Address '{}'",
-                            CStr::from_ptr(source.p_ip_address)
-                            .to_string_lossy()
-                            .into_owned()
-                        );
-                    }
-
-                    // We now have at least one source, so we create a receiver to look at it.
-                    // We tell it that we prefer YCbCr video since it is more efficient for us. If the source has an alpha channel
-                    // it will still be provided in BGRA
-                    let p_ndi_name = CString::new("Galicaster NDI Receiver").unwrap();
-                    let NDI_recv_create_desc = NDIlib_recv_create_v3_t {
-                        source_to_connect_to: source,
-                        p_ndi_name: p_ndi_name.as_ptr(),
-                        ..Default::default()
-                    };
-
-                    let pNDI_recv = NDIlib_recv_create_v3(&NDI_recv_create_desc);
-                    if pNDI_recv.is_null() {
-                        //println!("Cannot run NDI: NDIlib_recv_create_v3 error.");
-                        gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_recv_create_v3 error"]);
-                        return false;
-                        //::std::process::exit(1);
-                    }
-
-                    // Destroy the NDI finder. We needed to have access to the pointers to p_sources[0]
-                    NDIlib_find_destroy(pNDI_find);
-
-                    // We are now going to mark this source as being on program output for tally purposes (but not on preview)
-                    let tally_state: NDIlib_tally_t = Default::default();
-                    NDIlib_recv_set_tally(pNDI_recv, &tally_state);
-
-                    // Enable Hardwqre Decompression support if this support has it. Please read the caveats in the documentation
-                    // regarding this. There are times in which it might reduce the performance although on small stream numbers
-                    // it almost always yields the same or better performance.
-                    let data = CString::new("<ndi_hwaccel enabled=\"true\"/>").unwrap();
-                    let enable_hw_accel = NDIlib_metadata_frame_t {
-                        length: data.to_bytes().len() as i32,
-                        timecode: 0,
-                        p_data: data.as_ptr(),
-                    };
-
-                    NDIlib_recv_send_metadata(pNDI_recv, &enable_hw_accel);
-                    state.recv = Some(NdiInstance{recv: pNDI_recv});
-                    let start = SystemTime::now();
-                    let since_the_epoch = start.duration_since(UNIX_EPOCH)
-                    .expect("Time went backwards");
-                    println!("{:?}", since_the_epoch);
-                    state.start_pts = Some(since_the_epoch.as_secs() * 1000000000 +
-                    since_the_epoch.subsec_nanos() as u64);
-                    //TODO Another way to save NDI_recv variable
-                    // *state = State{
-                    //     info: state.info.clone(),
-                    //     recv: Some(NdiInstance{recv: pNDI_recv}),
-                    // };
-                }
-
-                true
+                // true
             }
 
             // Called when shutting down the element so we can release all stream-related state
             fn stop(&self, element: &BaseSrc) -> bool {
                 // Reset state
                 let state = self.state.lock().unwrap();
-                let recv = match state.recv{
-                    None => {
-                        //println!("pNDI_recv no encontrado");
-                        gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
-                        return true;
-                    }
-                    Some(ref recv) => recv.clone(),
-                };
-                let pNDI_recv = recv.recv;
-                unsafe{
-                    NDIlib_recv_destroy(pNDI_recv);
-                    //NDIlib_destroy();
-                }
+                // let recv = match state.recv{
+                //     None => {
+                //         //println!("pNDI_recv no encontrado");
+                //         gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
+                //         return true;
+                //     }
+                //     Some(ref recv) => recv.clone(),
+                // };
+                // let pNDI_recv = recv.recv;
+                // unsafe{
+                // let recv = match ndi2.recv{
+                //     None => {
+                //         //println!("pNDI_recv no encontrado");
+                //         gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
+                //         return true;
+                //     }
+                //     Some(ref recv) => recv.clone(),
+                // };
+                // let pNDI_recv = recv.recv;
+                //     NDIlib_recv_destroy(pNDI_recv);
+                //     //NDIlib_destroy();
+                // }
+                stop_ndi();
                 // Commented because when adding ndi destroy stopped in this line
                 //*self.state.lock().unwrap() = Default::default();
                 self.unlock(element);
@@ -512,7 +531,20 @@ impl NdiVideoSrc {
             fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
                 //We need to set the correct caps resolution and framerate
                 let state = self.state.lock().unwrap();
-                let recv = match state.recv{
+                // let recv = match state.recv{
+                //     None => {
+                //         //TODO Update gst_element_error with one more descriptive
+                //         //println!("pNDI_recv no encontrado");
+                //         gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
+                //         //TODO if none not return anything
+                //         return caps;
+                //     }
+                //     Some(ref recv) => recv.clone(),
+                // };
+                //
+                // let pNDI_recv = recv.recv;
+                unsafe{
+                let recv = match ndi2.recv{
                     None => {
                         //TODO Update gst_element_error with one more descriptive
                         //println!("pNDI_recv no encontrado");
@@ -544,6 +576,7 @@ impl NdiVideoSrc {
                 // called Caps::fixate() here
                 element.parent_fixate(caps)
             }
+        }
 
             //Creates the audio buffers
             fn create(
@@ -569,7 +602,18 @@ impl NdiVideoSrc {
                 };
                 //let mut pNDI_recva = ptr::null();
                 // {
-                let recv = match state.recv{
+                // let recv = match state.recv{
+                //     None => {
+                //         //TODO Update gst_element_error with one more descriptive
+                //         //println!("pNDI_recv no encontrado");
+                //         gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
+                //         return Err(gst::FlowReturn::NotNegotiated);
+                //     }
+                //     Some(ref recv) => recv.clone(),
+                // };
+                // let pNDI_recv = recv.recv;
+                unsafe{
+                let recv = match ndi2.recv{
                     None => {
                         //TODO Update gst_element_error with one more descriptive
                         //println!("pNDI_recv no encontrado");
@@ -581,7 +625,15 @@ impl NdiVideoSrc {
                 let pNDI_recv = recv.recv;
                 // }
 
-                let start_pts = match state.start_pts {
+                // let start_pts = match state.start_pts {
+                //     None => {
+                //         gst_element_error!(element, gst::CoreError::Negotiation, ["Have no caps yet"]);
+                //         return Err(gst::FlowReturn::NotNegotiated);
+                //     }
+                //     Some(ref start_pts) => start_pts.clone(),
+                // };
+
+                let start_pts = match ndi2.start_pts {
                     None => {
                         gst_element_error!(element, gst::CoreError::Negotiation, ["Have no caps yet"]);
                         return Err(gst::FlowReturn::NotNegotiated);
@@ -705,7 +757,7 @@ impl NdiVideoSrc {
                     Ok(buffer)
                 }
             }
-
+}
 
 
 
