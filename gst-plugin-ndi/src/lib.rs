@@ -1,3 +1,5 @@
+#![allow(non_camel_case_types, non_upper_case_globals, non_snake_case)]
+
 // Copyright (C) 2017 Sebastian Dröge <sebastian@centricular.com>
 //
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
@@ -21,7 +23,6 @@ extern crate num_traits;
 mod ndivideosrc;
 mod ndiaudiosrc;
 pub mod ndilib;
-pub mod a;
 
 use std::ptr;
 use std::{thread, time};
@@ -36,38 +37,29 @@ use gst_plugin::base_src::*;
 fn plugin_init(plugin: &gst::Plugin) -> bool {
     ndivideosrc::register(plugin);
     ndiaudiosrc::register(plugin);
-    // a::test(2);
-    // println!("---------------------------------------");
-    // let mut ndistruc = ndi1{
-    //     recv : 0
-    // };
     true
 }
 
 
-struct ndi1{
+struct ndi{
     recv: Option<NdiInstance>,
     start_pts: Option<u64>,
 }
 
-static mut ndi2: ndi1 = ndi1{
+static mut ndi_struct: ndi = ndi{
     recv: None,
     start_pts: None,
 };
 
-fn hue(element: &BaseSrc,  ip: String,  stream_name: String) -> bool{
-    println!("---------------------------------------");
+fn connect_ndi(element: &BaseSrc,  ip: String,  stream_name: String) -> bool{
         unsafe {
-            match ndi2.recv {
+            match ndi_struct.recv {
                 None => {
                     //gst_element_error!(element, gst::CoreError::Negotiation, ["Have no caps yet"]);
                     //return true;
                 }
                 _ => return true,
             };
-        //println!("{:?}", ndi2.recv);
-        //ndi2.recv = i;
-        //println!("{:?}", ndi2.recv);
         if !NDIlib_initialize() {
             //println!("Cannot run NDI: NDIlib_initialize error.");
             gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_initialize error"]);
@@ -77,14 +69,11 @@ fn hue(element: &BaseSrc,  ip: String,  stream_name: String) -> bool{
         let mut source: NDIlib_source_t = NDIlib_source_t{p_ndi_name: ptr::null(),
             p_ip_address: ptr::null()};
 
-            // print!("{:?}", settings.stream_name);
-            // print!("{:?}", settings.ip);
-
             //TODO default values
             let NDI_find_create_desc: NDIlib_find_create_t = Default::default();
             let pNDI_find = NDIlib_find_create_v2(&NDI_find_create_desc);
             let ip_ptr = CString::new(ip.clone()).unwrap();
-            if (ip_ptr == CString::new("").unwrap()){
+            if ip_ptr == CString::new("").unwrap(){
                 if pNDI_find.is_null() {
                     //println!("Cannot run NDI: NDIlib_find_create_v2 error.");
                     gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_find_create_v2 error"]);
@@ -92,7 +81,7 @@ fn hue(element: &BaseSrc,  ip: String,  stream_name: String) -> bool{
                 }
 
                 let mut total_sources: u32 = 0;
-                let mut p_sources = ptr::null();
+                let p_sources;
                 //TODO Delete while. If not, will loop until a source it's available
                 //while total_sources == 0 {
                 // TODO Sleep 1s to wait for all sources
@@ -179,25 +168,20 @@ fn hue(element: &BaseSrc,  ip: String,  stream_name: String) -> bool{
             };
 
             NDIlib_recv_send_metadata(pNDI_recv, &enable_hw_accel);
-            ndi2.recv = Some(NdiInstance{recv: pNDI_recv});
+            ndi_struct.recv = Some(NdiInstance{recv: pNDI_recv});
             let start = SystemTime::now();
             let since_the_epoch = start.duration_since(UNIX_EPOCH)
             .expect("Time went backwards");
             println!("{:?}", since_the_epoch);
-            ndi2.start_pts = Some(since_the_epoch.as_secs() * 1000000000 +
+            ndi_struct.start_pts = Some(since_the_epoch.as_secs() * 1000000000 +
             since_the_epoch.subsec_nanos() as u64);
-            //TODO Another way to save NDI_recv variable
-            // *state = State{
-            //     info: state.info.clone(),
-            //     recv: Some(NdiInstance{recv: pNDI_recv}),
-            // };
             return true;
         }
     }
 
     fn stop_ndi() -> bool{
         unsafe{
-            let recv = match ndi2.recv{
+            let recv = match ndi_struct.recv{
                 None => {
                     //TODO Update gst_element_error with one more descriptive
                     //println!("pNDI_recv no encontrado");
@@ -208,7 +192,7 @@ fn hue(element: &BaseSrc,  ip: String,  stream_name: String) -> bool{
             };
             let pNDI_recv = recv.recv;
             NDIlib_recv_destroy(pNDI_recv);
-            ndi2.recv = None;
+            ndi_struct.recv = None;
             //NDIlib_destroy();
             return true;
         }

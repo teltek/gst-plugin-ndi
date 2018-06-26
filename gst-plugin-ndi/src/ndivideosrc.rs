@@ -16,15 +16,11 @@ use std::sync::Mutex;
 use std::{i32, u32};
 
 use std::ptr;
-use std::{thread, time};
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::ffi::{CStr, CString};
 
 use ndilib::*;
-use hue;
-use ndi2;
+use connect_ndi;
+use ndi_struct;
 use stop_ndi;
-use get_frame;
 
 // Property value storage
 #[derive(Debug, Clone)]
@@ -64,16 +60,12 @@ Property::String(
 // and sample offset
 struct State {
     info: Option<gst_video::VideoInfo>,
-    recv: Option<NdiInstance>,
-    start_pts: Option<u64>,
 }
 
 impl Default for State {
     fn default() -> State {
         State {
             info: None,
-            recv: None,
-            start_pts: None,
         }
     }
 }
@@ -254,80 +246,6 @@ impl NdiVideoSrc {
     impl ElementImpl<BaseSrc> for NdiVideoSrc {
     }
 
-    // fn get_frame(ndisrc_struct: &NdiVideoSrc, element: &BaseSrc, pNDI_recv : NDIlib_recv_instance_t, pts2 : &mut u64, pts : &mut u64) -> NDIlib_video_frame_v2_t{
-    //     unsafe{
-    //         let video_frame: NDIlib_video_frame_v2_t = Default::default();
-    //         let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
-    //         let metadata_frame: NDIlib_metadata_frame_t = Default::default();
-    //
-    //         //TODO Only create buffer when we got a video frame
-    //         let mut frame = false;
-    //         while !frame{
-    //             let frame_type = NDIlib_recv_capture_v2(
-    //                 pNDI_recv,
-    //                 &video_frame,
-    //                 ptr::null(),
-    //                 ptr::null(),
-    //                 1000,
-    //             );
-    //
-    //             match frame_type {
-    //                 NDIlib_frame_type_e::NDIlib_frame_type_video => {
-    //                     gst_debug!(ndisrc_struct.cat, obj: element, "Received video frame: {:?}", video_frame);
-    //                     frame = true;
-    //                     //pts = ((video_frame.timestamp as u64) * 100) - state.start_pts.unwrap();
-    //                     // println!("{:?}", pts/1000000);
-    //                     // println!("{:?}", video_frame.timestamp);
-    //                     // println!("{:?}", video_frame.timecode);
-    //                     //*pts = ((video_frame.timestamp as u64) * 100);
-    //                     *pts = ((video_frame.timecode as u64) * 100);
-    //                     if *pts2 == 0{
-    //                         // *pts2 = (video_frame.timestamp as u64) * 100;
-    //                         *pts2 = (video_frame.timecode as u64) * 100;
-    //                         *pts = 0;
-    //                     }
-    //                     else{
-    //                         // println!("{:?}", video_frame.timecode * 100);
-    //                         // println!("{:?}", pts2.pts);
-    //                         //*pts = (((video_frame.timestamp as u64) * 100) - *pts2);
-    //                         *pts = (((video_frame.timecode as u64) * 100) - *pts2);
-    //                         //println!("{:?}", pts/1000000);
-    //                     }
-    //
-    //                 }
-    //                 NDIlib_frame_type_e::NDIlib_frame_type_audio => {
-    //                     gst_debug!(ndisrc_struct.cat, obj: element, "Received audio frame: {:?}", video_frame);
-    //                 }
-    //                 NDIlib_frame_type_e::NDIlib_frame_type_metadata => {
-    //                     // println!(
-    //                     //     "Tengo metadata {} '{}'",
-    //                     //     metadata_frame.length,
-    //                     //     CStr::from_ptr(metadata_frame.p_data)
-    //                     //     .to_string_lossy()
-    //                     //     .into_owned(),
-    //                     // );
-    //                     //TODO Change gst_warning to gst_debug
-    //                     gst_debug!(ndisrc_struct.cat, obj: element, "Received metadata frame: {:?}", CStr::from_ptr(metadata_frame.p_data).to_string_lossy().into_owned(),);
-    //                 }
-    //                 NDIlib_frame_type_e::NDIlib_frame_type_error => {
-    //                     // println!(
-    //                     //     "Tengo error {} '{}'",
-    //                     //     metadata_frame.length,
-    //                     //     CStr::from_ptr(metadata_frame.p_data)
-    //                     //     .to_string_lossy()
-    //                     //     .into_owned(),
-    //                     // );
-    //                     //TODO Change gst_warning to gst_debug
-    //                     gst_debug!(ndisrc_struct.cat, obj: element, "Received error frame: {:?}", CStr::from_ptr(metadata_frame.p_data).to_string_lossy().into_owned());
-    //                     // break;
-    //                 }
-    //                 _ => println!("Tengo {:?}", frame_type),
-    //             }
-    //         }
-    //         return video_frame;
-    //     }
-    // }
-
     // Virtual methods of gst_base::BaseSrc
     impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
         // Called whenever the input/output caps are changing, i.e. in the very beginning before data
@@ -359,167 +277,14 @@ impl NdiVideoSrc {
             self.unlock_stop(element);
 
             gst_warning!(self.cat, obj: element, "Starting");
-            let mut state = self.state.lock().unwrap();
-            //let mut settings = self.settings.lock().unwrap();
             let settings = self.settings.lock().unwrap();
-
-            //let mut pNDI_recv = state.recv;
-            unsafe {
-                return hue(element, settings.ip.clone(), settings.stream_name.clone());
-                // if !NDIlib_initialize() {
-                //     //println!("Cannot run NDI: NDIlib_initialize error.");
-                //     gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_initialize error"]);
-                //     return false;
-                // }
-                //
-                // let mut source: NDIlib_source_t = NDIlib_source_t{p_ndi_name: ptr::null(),
-                //     p_ip_address: ptr::null()};
-                //
-                //     // print!("{:?}", settings.stream_name);
-                //     // print!("{:?}", settings.ip);
-                //
-                //     //TODO default values
-                //     let NDI_find_create_desc: NDIlib_find_create_t = Default::default();
-                //     let pNDI_find = NDIlib_find_create_v2(&NDI_find_create_desc);
-                //     let ip_ptr = CString::new(settings.ip.clone()).unwrap();
-                //     if (ip_ptr == CString::new("").unwrap()){
-                //         if pNDI_find.is_null() {
-                //             //println!("Cannot run NDI: NDIlib_find_create_v2 error.");
-                //             gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_find_create_v2 error"]);
-                //             return false;
-                //         }
-                //
-                //         let mut total_sources: u32 = 0;
-                //         let mut p_sources = ptr::null();
-                //         //TODO Delete while. If not, will loop until a source it's available
-                //         //while total_sources == 0 {
-                //         // TODO Sleep 1s to wait for all sources
-                //         thread::sleep(time::Duration::from_millis(2000));
-                //         p_sources = NDIlib_find_get_current_sources(pNDI_find, &mut total_sources as *mut u32);
-                //         //}
-                //
-                //         // We need at least one source
-                //         if p_sources.is_null() {
-                //             //println!("Error getting NDIlib_find_get_current_sources.");
-                //             gst_element_error!(element, gst::CoreError::Negotiation, ["Error getting NDIlib_find_get_current_sources"]);
-                //             return false;
-                //             //::std::process::exit(1);
-                //         }
-                //
-                //         let mut no_source: isize = -1;
-                //         for i in 0..total_sources as isize{
-                //             if CStr::from_ptr((*p_sources.offset(i)).p_ndi_name)
-                //             .to_string_lossy()
-                //             .into_owned() == settings.stream_name{
-                //                 no_source = i;
-                //                 break;
-                //             }
-                //         }
-                //         if no_source  == -1 {
-                //             gst_element_error!(element, gst::CoreError::Negotiation, ["Stream name not found"]);
-                //             return false;
-                //         }
-                //         println!(
-                //             "Total_sources {}: Name '{}' Address '{}'",
-                //             total_sources,
-                //             CStr::from_ptr((*p_sources.offset(no_source)).p_ndi_name)
-                //             .to_string_lossy()
-                //             .into_owned(),
-                //             CStr::from_ptr((*p_sources.offset(no_source)).p_ip_address)
-                //             .to_string_lossy()
-                //             .into_owned()
-                //         );
-                //         source = *p_sources.offset(no_source).clone();
-                //     }
-                //     else{
-                //         source.p_ip_address = ip_ptr.as_ptr();
-                //         println!(
-                //             "Address '{}'",
-                //             CStr::from_ptr(source.p_ip_address)
-                //             .to_string_lossy()
-                //             .into_owned()
-                //         );
-                //     }
-                //
-                //     // We now have at least one source, so we create a receiver to look at it.
-                //     // We tell it that we prefer YCbCr video since it is more efficient for us. If the source has an alpha channel
-                //     // it will still be provided in BGRA
-                //     let p_ndi_name = CString::new("Galicaster NDI Receiver").unwrap();
-                //     let NDI_recv_create_desc = NDIlib_recv_create_v3_t {
-                //         source_to_connect_to: source,
-                //         p_ndi_name: p_ndi_name.as_ptr(),
-                //         ..Default::default()
-                //     };
-                //
-                //     let pNDI_recv = NDIlib_recv_create_v3(&NDI_recv_create_desc);
-                //     if pNDI_recv.is_null() {
-                //         //println!("Cannot run NDI: NDIlib_recv_create_v3 error.");
-                //         gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_recv_create_v3 error"]);
-                //         return false;
-                //         //::std::process::exit(1);
-                //     }
-                //
-                //     // Destroy the NDI finder. We needed to have access to the pointers to p_sources[0]
-                //     NDIlib_find_destroy(pNDI_find);
-                //
-                //     // We are now going to mark this source as being on program output for tally purposes (but not on preview)
-                //     let tally_state: NDIlib_tally_t = Default::default();
-                //     NDIlib_recv_set_tally(pNDI_recv, &tally_state);
-                //
-                //     // Enable Hardwqre Decompression support if this support has it. Please read the caveats in the documentation
-                //     // regarding this. There are times in which it might reduce the performance although on small stream numbers
-                //     // it almost always yields the same or better performance.
-                //     let data = CString::new("<ndi_hwaccel enabled=\"true\"/>").unwrap();
-                //     let enable_hw_accel = NDIlib_metadata_frame_t {
-                //         length: data.to_bytes().len() as i32,
-                //         timecode: 0,
-                //         p_data: data.as_ptr(),
-                //     };
-                //
-                //     NDIlib_recv_send_metadata(pNDI_recv, &enable_hw_accel);
-                //     state.recv = Some(NdiInstance{recv: pNDI_recv});
-                //     let start = SystemTime::now();
-                //     let since_the_epoch = start.duration_since(UNIX_EPOCH)
-                //     .expect("Time went backwards");
-                //     println!("{:?}", since_the_epoch);
-                //     state.start_pts = Some(since_the_epoch.as_secs() * 1000000000 +
-                //     since_the_epoch.subsec_nanos() as u64);
-                //     //TODO Another way to save NDI_recv variable
-                //     // *state = State{
-                //     //     info: state.info.clone(),
-                //     //     recv: Some(NdiInstance{recv: pNDI_recv}),
-                //     // };
-            }
-
-            // true
+            return connect_ndi(element, settings.ip.clone(), settings.stream_name.clone());
         }
 
         // Called when shutting down the element so we can release all stream-related state
         fn stop(&self, element: &BaseSrc) -> bool {
             // Reset state
-            let state = self.state.lock().unwrap();
-            // let recv = match state.recv{
-            //     None => {
-            //         //println!("pNDI_recv no encontrado");
-            //         gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
-            //         return true;
-            //     }
-            //     Some(ref recv) => recv.clone(),
-            // };
-            // let pNDI_recv = recv.recv;
-            // unsafe{
-            // let recv = match ndi2.recv{
-            //     None => {
-            //         //println!("pNDI_recv no encontrado");
-            //         gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
-            //         return true;
-            //     }
-            //     Some(ref recv) => recv.clone(),
-            // };
-            // let pNDI_recv = recv.recv;
-            //     NDIlib_recv_destroy(pNDI_recv);
-            //     //NDIlib_destroy();
-            // }
+            *self.state.lock().unwrap() = Default::default();
             stop_ndi();
             // Commented because when adding ndi destroy stopped in this line
             //*self.state.lock().unwrap() = Default::default();
@@ -531,21 +296,8 @@ impl NdiVideoSrc {
 
         fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
             //We need to set the correct caps resolution and framerate
-            let state = self.state.lock().unwrap();
-            // let recv = match state.recv{
-            //     None => {
-            //         //TODO Update gst_element_error with one more descriptive
-            //         //println!("pNDI_recv no encontrado");
-            //         gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
-            //         //TODO if none not return anything
-            //         return caps;
-            //     }
-            //     Some(ref recv) => recv.clone(),
-            // };
-            //
-            // let pNDI_recv = recv.recv;
             unsafe{
-                let recv = match ndi2.recv{
+                let recv = match ndi_struct.recv{
                     None => {
                         //TODO Update gst_element_error with one more descriptive
                         //println!("pNDI_recv no encontrado");
@@ -558,20 +310,14 @@ impl NdiVideoSrc {
 
                 let pNDI_recv = recv.recv;
                 let mut pts2 = self.pts.lock().unwrap();
-                let mut pts: u64 = 0;
 
                 let video_frame: NDIlib_video_frame_v2_t = Default::default();
-                // let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
-                // let metadata_frame: NDIlib_metadata_frame_t = Default::default();
-                //let video_frame: NDIlib_video_frame_v2_t = get_frame(self, element, pNDI_recv, &mut pts2.pts, &mut pts);
-                //get_frame(element, pNDI_recv, &video_frame, &audio_frame, &metadata_frame, &mut pts2.pts, &mut pts);
                 let mut frame_type: NDIlib_frame_type_e = NDIlib_frame_type_e::NDIlib_frame_type_none;
-                while (frame_type != NDIlib_frame_type_e::NDIlib_frame_type_video){
+                while frame_type != NDIlib_frame_type_e::NDIlib_frame_type_video{
                     frame_type = NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000);
                 }
-                println!("{:?}", video_frame.timecode);
                 pts2.pts = (video_frame.timecode as u64) * 100;
-                pts = 0;
+
                 let mut caps = gst::Caps::truncate(caps);
                 {
                     let caps = caps.make_mut();
@@ -612,20 +358,8 @@ impl NdiVideoSrc {
                 }
                 Some(ref info) => info.clone(),
             };
-            //let mut pNDI_recva = ptr::null();
-            // {
-            // let recv = match state.recv{
-            //     None => {
-            //         //TODO Update gst_element_error with one more descriptive
-            //         //println!("pNDI_recv no encontrado");
-            //         gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
-            //         return Err(gst::FlowReturn::NotNegotiated);
-            //     }
-            //     Some(ref recv) => recv.clone(),
-            // };
-            // let pNDI_recv = recv.recv;
             unsafe{
-                let recv = match ndi2.recv{
+                let recv = match ndi_struct.recv{
                     None => {
                         //TODO Update gst_element_error with one more descriptive
                         //println!("pNDI_recv no encontrado");
@@ -635,150 +369,39 @@ impl NdiVideoSrc {
                     Some(ref recv) => recv.clone(),
                 };
                 let pNDI_recv = recv.recv;
-                // }
 
-                // let start_pts = match state.start_pts {
-                //     None => {
-                //         gst_element_error!(element, gst::CoreError::Negotiation, ["Have no caps yet"]);
-                //         return Err(gst::FlowReturn::NotNegotiated);
-                //     }
-                //     Some(ref start_pts) => start_pts.clone(),
-                // };
+                let pts: u64;
+                let video_frame: NDIlib_video_frame_v2_t = Default::default();
 
-                let start_pts = match ndi2.start_pts {
-                    None => {
-                        gst_element_error!(element, gst::CoreError::Negotiation, ["Have no caps yet"]);
-                        return Err(gst::FlowReturn::NotNegotiated);
-                    }
-                    Some(ref start_pts) => start_pts.clone(),
-                };
+                NDIlib_recv_capture_v2(
+                    pNDI_recv,
+                    &video_frame,
+                    ptr::null(),
+                    ptr::null(),
+                    1000,
+                );
+                pts = ((video_frame.timecode as u64) * 100) - pts2.pts;
 
-                unsafe{
-                    // // loop {
-                    let mut pts: u64 = 0;
-                    //let video_frame: NDIlib_video_frame_v2_t = get_frame(self, element, pNDI_recv, &mut pts2.pts, &mut pts);
-                    let video_frame: NDIlib_video_frame_v2_t = Default::default();
-                    // let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
-                    // let metadata_frame: NDIlib_metadata_frame_t = Default::default();
-                    //get_frame(element, pNDI_recv, &video_frame, &audio_frame, &metadata_frame, &mut pts2.pts, &mut pts);
+                let buff_size = (video_frame.yres * video_frame.line_stride_in_bytes) as usize;
+                //println!("{:?}", buff_size);
+                let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
+                {
+                    let vec = Vec::from_raw_parts(video_frame.p_data as *mut u8, buff_size, buff_size);
+                    let pts: gst::ClockTime = (pts).into();
+                    //TODO get duration
+                    let duration: gst::ClockTime = (40000000).into();
+                    let buffer = buffer.get_mut().unwrap();
+                    buffer.set_pts(pts);
+                    buffer.set_duration(duration);
+                    buffer.set_offset(pts2.offset);
+                    buffer.set_offset_end(pts2.offset + 1);
+                    pts2.offset = pts2.offset +1;
+                    buffer.copy_from_slice(0, &vec).unwrap();
 
-                    NDIlib_recv_capture_v2(
-                        pNDI_recv,
-                        &video_frame,
-                        ptr::null(),
-                        ptr::null(),
-                        1000,
-                    );
-                    pts = (((video_frame.timecode as u64) * 100) - pts2.pts);
-                    //video_frame = get_frame(self, element, pNDI_recv, pts2.pts);
-
-                    // //TODO Only create buffer when we got a video frame
-                    // let mut frame = false;
-                    // let mut pts: u64 = 0;
-                    // while !frame{
-                    //     let frame_type = NDIlib_recv_capture_v2(
-                    //         pNDI_recv,
-                    //         &video_frame,
-                    //         &audio_frame,
-                    //         &metadata_frame,
-                    //         1000,
-                    //     );
-                    //
-                    //     match frame_type {
-                    //         NDIlib_frame_type_e::NDIlib_frame_type_video => {
-                    //             gst_debug!(self.cat, obj: element, "Received video frame: {:?}", video_frame);
-                    //             frame = true;
-                    //             //pts = ((video_frame.timestamp as u64) * 100) - state.start_pts.unwrap();
-                    //             // println!("{:?}", pts/1000000);
-                    //             pts = (video_frame.timestamp as u64) * 100;
-                    //             if pts2.pts == 0{
-                    //                 pts2.pts = (video_frame.timestamp as u64) * 100;
-                    //                 pts = 0;
-                    //                 //let mut caps = _info.to_caps();
-                    //                 // let s = caps.get_mut_structure(0).unwrap();
-                    //                 // s.fixate_field_nearest_int("width", 1500);
-                    //                 // s.fixate_field_nearest_int("framerate", 25/1);
-                    //                 // self.set_caps(&self, s);
-                    //                 // let mut caps = Some(gst::Caps::new_simple(
-                    //                 //     "video/x-raw",
-                    //                 //     &[("format",
-                    //                 //         &gst_video::VideoFormat::Uyvy.to_string()
-                    //                 //     )],
-                    //                 // ));
-                    //                 // caps.as_mut().map(|c| {
-                    //                 //     c.get_mut()
-                    //                 //     .unwrap()
-                    //                 //     .set_simple(&[("framerate", &(25/1 as i32)), ("width", &(1600 as i32)), ("height", &(1200 as i32))])
-                    //                 // });
-                    //                 //caps.unwrap().set_simple(&[("framerate", &(20/1 as i32))]);
-                    //                 //let mut caps2 = _info.to_caps().unwrap();
-                    //                 // println!("{:?}", caps);
-                    //                 //element.parent_set_caps(&caps.unwrap());
-                    //                 //element.parent_fixate(caps.unwrap());
-                    //                 //gst_video::VideoInfo::from_caps(&caps.unwrap());
-                    //                 //self.set_caps(element, &caps.unwrap());
-                    //             }
-                    //             else{
-                    //                 // println!("{:?}", video_frame.timecode * 100);
-                    //                 // println!("{:?}", pts2.pts);
-                    //                 pts = (((video_frame.timestamp as u64) * 100) - pts2.pts);
-                    //                 //println!("{:?}", pts/1000000);
-                    //             }
-                    //
-                    //         }
-                    //         NDIlib_frame_type_e::NDIlib_frame_type_audio => {
-                    //             gst_debug!(self.cat, obj: element, "Received audio frame: {:?}", video_frame);
-                    //         }
-                    //         NDIlib_frame_type_e::NDIlib_frame_type_metadata => {
-                    //             // println!(
-                    //             //     "Tengo metadata {} '{}'",
-                    //             //     metadata_frame.length,
-                    //             //     CStr::from_ptr(metadata_frame.p_data)
-                    //             //     .to_string_lossy()
-                    //             //     .into_owned(),
-                    //             // );
-                    //             //TODO Change gst_warning to gst_debug
-                    //             gst_debug!(self.cat, obj: element, "Received metadata frame: {:?}", CStr::from_ptr(metadata_frame.p_data).to_string_lossy().into_owned(),);
-                    //         }
-                    //         NDIlib_frame_type_e::NDIlib_frame_type_error => {
-                    //             // println!(
-                    //             //     "Tengo error {} '{}'",
-                    //             //     metadata_frame.length,
-                    //             //     CStr::from_ptr(metadata_frame.p_data)
-                    //             //     .to_string_lossy()
-                    //             //     .into_owned(),
-                    //             // );
-                    //             //TODO Change gst_warning to gst_debug
-                    //             gst_debug!(self.cat, obj: element, "Received error frame: {:?}", CStr::from_ptr(metadata_frame.p_data).to_string_lossy().into_owned());
-                    //             // break;
-                    //         }
-                    //         _ => println!("Tengo {:?}", frame_type),
-                    //     }
-                    // }
-                    // // }
-
-
-                    let buff_size = (video_frame.yres * video_frame.line_stride_in_bytes) as usize;
-                    //println!("{:?}", buff_size);
-                    let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
-                    {
-                        let vec = Vec::from_raw_parts(video_frame.p_data as *mut u8, buff_size, buff_size);
-                        let pts: gst::ClockTime = (pts).into();
-                        //TODO get duration
-                        let duration: gst::ClockTime = (40000000).into();
-                        let buffer = buffer.get_mut().unwrap();
-                        buffer.set_pts(pts);
-                        buffer.set_duration(duration);
-                        buffer.set_offset(pts2.offset);
-                        buffer.set_offset_end(pts2.offset + 1);
-                        pts2.offset = pts2.offset +1;
-                        buffer.copy_from_slice(0, &vec).unwrap();
-
-                    }
-
-                    gst_debug!(self.cat, obj: element, "Produced buffer {:?}", buffer);
-                    Ok(buffer)
                 }
+
+                gst_debug!(self.cat, obj: element, "Produced buffer {:?}", buffer);
+                Ok(buffer)
             }
         }
 

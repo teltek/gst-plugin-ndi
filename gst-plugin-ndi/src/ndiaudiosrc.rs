@@ -5,7 +5,6 @@ use gst;
 use gst::prelude::*;
 use gst_audio;
 use gst_base::prelude::*;
-use gst::Fraction;
 
 use gst_plugin::base_src::*;
 use gst_plugin::element::*;
@@ -16,20 +15,11 @@ use std::sync::Mutex;
 use std::{i32, u32};
 
 use std::ptr;
-use std::{thread, time};
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::ffi::{CStr, CString};
-
-use num_traits::float::Float;
-use num_traits::cast::NumCast;
-use byte_slice_cast::FromByteSlice;
-use byte_slice_cast::AsSliceOf;
 
 use ndilib::*;
-use hue;
-use ndi2;
+use connect_ndi;
+use ndi_struct;
 use stop_ndi;
-use get_frame;
 
 // Property value storage
 #[derive(Debug, Clone)]
@@ -69,16 +59,12 @@ Property::String(
 // and sample offset
 struct State {
     info: Option<gst_audio::AudioInfo>,
-    recv: Option<NdiInstance>,
-    start_pts: Option<u64>,
 }
 
 impl Default for State {
     fn default() -> State {
         State {
             info: None,
-            recv: None,
-            start_pts: None,
         }
     }
 }
@@ -252,94 +238,6 @@ impl NdiAudioSrc {
     impl ElementImpl<BaseSrc> for NdiAudioSrc {
     }
 
-    // fn get_frame(ndisrc_struct: &NdiAudioSrc, element: &BaseSrc, pNDI_recv : NDIlib_recv_instance_t, pts2 : &mut u64, pts : &mut u64) -> NDIlib_audio_frame_v2_t{
-    //     unsafe{
-    //         let video_frame: NDIlib_video_frame_v2_t = Default::default();
-    //         let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
-    //         let metadata_frame: NDIlib_metadata_frame_t = Default::default();
-    //
-    //         //TODO Only create buffer when we got a video frame
-    //         let mut frame = false;
-    //         while !frame{
-    //             let frame_type = NDIlib_recv_capture_v2(
-    //                 pNDI_recv,
-    //                 ptr::null(),
-    //                 &audio_frame,
-    //                 ptr::null(),
-    //                 1000,
-    //             );
-    //             match frame_type {
-    //                 NDIlib_frame_type_e::NDIlib_frame_type_video => {
-    //                     println!("Videeeeeeo frrrame");
-    //                     gst_debug!(ndisrc_struct.cat, obj: element, "Received video frame: {:?}", video_frame);
-    //                     //frame = true;
-    //                     //pts = ((video_frame.timestamp as u64) * 100) - state.start_pts.unwrap();
-    //                     // println!("{:?}", pts/1000000);
-    //                     *pts = ((video_frame.timestamp as u64) * 100);
-    //                     if *pts2 == 0{
-    //                         *pts2 = (video_frame.timestamp as u64) * 100;
-    //                         *pts = 0;
-    //                     }
-    //                     else{
-    //                         // println!("{:?}", video_frame.timecode * 100);
-    //                         // println!("{:?}", pts2.pts);
-    //                         *pts = (((video_frame.timestamp as u64) * 100) - *pts2);
-    //                         //println!("{:?}", pts/1000000);
-    //                     }
-    //
-    //                 }
-    //                 NDIlib_frame_type_e::NDIlib_frame_type_audio => {
-    //                     gst_debug!(ndisrc_struct.cat, obj: element, "Received audio frame: {:?}", video_frame);
-    //                     frame = true;
-    //                     //pts = ((video_frame.timestamp as u64) * 100) - state.start_pts.unwrap();
-    //                     //println!("{:?}", *pts/1000000);
-    //                     // println!("{:?}", audio_frame.timestamp);
-    //                     // println!("{:?}", audio_frame.timecode);
-    //                     // *pts = ((audio_frame.timestamp as u64) * 100);
-    //                     *pts = ((audio_frame.timecode as u64) * 100);
-    //                     if *pts2 == 0{
-    //                         // *pts2 = (audio_frame.timestamp as u64) * 100;
-    //                         *pts2 = (audio_frame.timecode as u64) * 100;
-    //                         *pts = 0;
-    //                     }
-    //                     else{
-    //                         // println!("{:?}", video_frame.timecode * 100);
-    //                         // println!("{:?}", pts2.pts);
-    //                         // *pts = (((audio_frame.timestamp as u64) * 100) - *pts2);
-    //                         *pts = (((audio_frame.timecode as u64) * 100) - *pts2);
-    //                         //println!("{:?}", pts/1000000);
-    //                     }
-    //                 }
-    //                 NDIlib_frame_type_e::NDIlib_frame_type_metadata => {
-    //                     // println!(
-    //                     //     "Tengo metadata {} '{}'",
-    //                     //     metadata_frame.length,
-    //                     //     CStr::from_ptr(metadata_frame.p_data)
-    //                     //     .to_string_lossy()
-    //                     //     .into_owned(),
-    //                     // );
-    //                     //TODO Change gst_warning to gst_debug
-    //                     gst_debug!(ndisrc_struct.cat, obj: element, "Received metadata frame: {:?}", CStr::from_ptr(metadata_frame.p_data).to_string_lossy().into_owned(),);
-    //                 }
-    //                 NDIlib_frame_type_e::NDIlib_frame_type_error => {
-    //                     // println!(
-    //                     //     "Tengo error {} '{}'",
-    //                     //     metadata_frame.length,
-    //                     //     CStr::from_ptr(metadata_frame.p_data)
-    //                     //     .to_string_lossy()
-    //                     //     .into_owned(),
-    //                     // );
-    //                     //TODO Change gst_warning to gst_debug
-    //                     gst_debug!(ndisrc_struct.cat, obj: element, "Received error frame: {:?}", CStr::from_ptr(metadata_frame.p_data).to_string_lossy().into_owned());
-    //                     // break;
-    //                 }
-    //                 _ => println!("Tengo {:?}", frame_type),
-    //             }
-    //         }
-    //         return audio_frame;
-    //     }
-    // }
-
     // Virtual methods of gst_base::BaseSrc
     impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
         // Called whenever the input/output caps are changing, i.e. in the very beginning before data
@@ -366,199 +264,33 @@ impl NdiAudioSrc {
 
         // Called when starting, so we can initialize all stream-related state to its defaults
         fn start(&self, element: &BaseSrc) -> bool {
-            println!("/*/*/*/*/*/*/*/*/*");
             // Reset state
             *self.state.lock().unwrap() = Default::default();
             self.unlock_stop(element);
 
             gst_warning!(self.cat, obj: element, "Starting");
-            let mut state = self.state.lock().unwrap();
-            //let mut settings = self.settings.lock().unwrap();
             let settings = self.settings.lock().unwrap();
+            return connect_ndi(element, settings.ip.clone(), settings.stream_name.clone());
 
-            //let mut pNDI_recv = state.recv;
-            unsafe {
-                return hue(element, settings.ip.clone(), settings.stream_name.clone());
-                // if !NDIlib_initialize() {
-                //     //println!("Cannot run NDI: NDIlib_initialize error.");
-                //     gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_initialize error"]);
-                //     return false;
-                // }
-                //
-                // let mut source: NDIlib_source_t = NDIlib_source_t{p_ndi_name: ptr::null(),
-                //     p_ip_address: ptr::null()};
-                //
-                //     // print!("{:?}", settings.stream_name);
-                //     // print!("{:?}", settings.ip);
-                //
-                //     //TODO default values
-                //     let NDI_find_create_desc: NDIlib_find_create_t = Default::default();
-                //     let pNDI_find = NDIlib_find_create_v2(&NDI_find_create_desc);
-                //     let ip_ptr = CString::new(settings.ip.clone()).unwrap();
-                //     if (ip_ptr == CString::new("").unwrap()){
-                //         if pNDI_find.is_null() {
-                //             //println!("Cannot run NDI: NDIlib_find_create_v2 error.");
-                //             gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_find_create_v2 error"]);
-                //             return false;
-                //         }
-                //
-                //         let mut total_sources: u32 = 0;
-                //         let mut p_sources = ptr::null();
-                //         //TODO Delete while. If not, will loop until a source it's available
-                //         //while total_sources == 0 {
-                //         // TODO Sleep 1s to wait for all sources
-                //         thread::sleep(time::Duration::from_millis(2000));
-                //         p_sources = NDIlib_find_get_current_sources(pNDI_find, &mut total_sources as *mut u32);
-                //         //}
-                //
-                //         // We need at least one source
-                //         if p_sources.is_null() {
-                //             //println!("Error getting NDIlib_find_get_current_sources.");
-                //             gst_element_error!(element, gst::CoreError::Negotiation, ["Error getting NDIlib_find_get_current_sources"]);
-                //             return false;
-                //             //::std::process::exit(1);
-                //         }
-                //
-                //         let mut no_source: isize = -1;
-                //         for i in 0..total_sources as isize{
-                //             if CStr::from_ptr((*p_sources.offset(i)).p_ndi_name)
-                //             .to_string_lossy()
-                //             .into_owned() == settings.stream_name{
-                //                 no_source = i;
-                //                 break;
-                //             }
-                //         }
-                //         if no_source  == -1 {
-                //             gst_element_error!(element, gst::CoreError::Negotiation, ["Stream name not found"]);
-                //             return false;
-                //         }
-                //         println!(
-                //             "Total_sources {}: Name '{}' Address '{}'",
-                //             total_sources,
-                //             CStr::from_ptr((*p_sources.offset(no_source)).p_ndi_name)
-                //             .to_string_lossy()
-                //             .into_owned(),
-                //             CStr::from_ptr((*p_sources.offset(no_source)).p_ip_address)
-                //             .to_string_lossy()
-                //             .into_owned()
-                //         );
-                //         source = *p_sources.offset(no_source).clone();
-                //     }
-                //     else{
-                //         source.p_ip_address = ip_ptr.as_ptr();
-                //         println!(
-                //             "Address '{}'",
-                //             CStr::from_ptr(source.p_ip_address)
-                //             .to_string_lossy()
-                //             .into_owned()
-                //         );
-                //     }
-                //
-                //     // We now have at least one source, so we create a receiver to look at it.
-                //     // We tell it that we prefer YCbCr video since it is more efficient for us. If the source has an alpha channel
-                //     // it will still be provided in BGRA
-                //     let p_ndi_name = CString::new("Galicaster NDI Receiver").unwrap();
-                //     let NDI_recv_create_desc = NDIlib_recv_create_v3_t {
-                //         source_to_connect_to: source,
-                //         p_ndi_name: p_ndi_name.as_ptr(),
-                //         ..Default::default()
-                //     };
-                //
-                //     let pNDI_recv = NDIlib_recv_create_v3(&NDI_recv_create_desc);
-                //     if pNDI_recv.is_null() {
-                //         //println!("Cannot run NDI: NDIlib_recv_create_v3 error.");
-                //         gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_recv_create_v3 error"]);
-                //         return false;
-                //         //::std::process::exit(1);
-                //     }
-                //
-                //     // Destroy the NDI finder. We needed to have access to the pointers to p_sources[0]
-                //     NDIlib_find_destroy(pNDI_find);
-                //
-                //     // We are now going to mark this source as being on program output for tally purposes (but not on preview)
-                //     let tally_state: NDIlib_tally_t = Default::default();
-                //     NDIlib_recv_set_tally(pNDI_recv, &tally_state);
-                //
-                //     // Enable Hardwqre Decompression support if this support has it. Please read the caveats in the documentation
-                //     // regarding this. There are times in which it might reduce the performance although on small stream numbers
-                //     // it almost always yields the same or better performance.
-                //     let data = CString::new("<ndi_hwaccel enabled=\"true\"/>").unwrap();
-                //     let enable_hw_accel = NDIlib_metadata_frame_t {
-                //         length: data.to_bytes().len() as i32,
-                //         timecode: 0,
-                //         p_data: data.as_ptr(),
-                //     };
-                //
-                //     NDIlib_recv_send_metadata(pNDI_recv, &enable_hw_accel);
-                //     state.recv = Some(NdiInstance{recv: pNDI_recv});
-                //     let start = SystemTime::now();
-                //     let since_the_epoch = start.duration_since(UNIX_EPOCH)
-                //     .expect("Time went backwards");
-                //     println!("{:?}", since_the_epoch);
-                //     state.start_pts = Some(since_the_epoch.as_secs() * 1000000000 +
-                //     since_the_epoch.subsec_nanos() as u64);
-                //     //TODO Another way to save NDI_recv variable
-                //     // *state = State{
-                //     //     info: state.info.clone(),
-                //     //     recv: Some(NdiInstance{recv: pNDI_recv}),
-                //     // };
-                }
+        }
 
-                //true
-            }
+        // Called when shutting down the element so we can release all stream-related state
+        fn stop(&self, element: &BaseSrc) -> bool {
+            // Reset state
+            *self.state.lock().unwrap() = Default::default();
+            stop_ndi();
+            // Commented because when adding ndi destroy stopped in this line
+            //*self.state.lock().unwrap() = Default::default();
+            self.unlock(element);
+            gst_info!(self.cat, obj: element, "Stopped");
 
-            // Called when shutting down the element so we can release all stream-related state
-            fn stop(&self, element: &BaseSrc) -> bool {
-                // Reset state
-                let state = self.state.lock().unwrap();
-                // let recv = match state.recv{
-                //     None => {
-                //         //println!("pNDI_recv no encontrado");
-                //         gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
-                //         return true;
-                //     }
-                //     Some(ref recv) => recv.clone(),
-                // };
-                // let pNDI_recv = recv.recv;
-                // unsafe{
-                //     let recv = match ndi2.recv{
-                //         None => {
-                //             //TODO Update gst_element_error with one more descriptive
-                //             //println!("pNDI_recv no encontrado");
-                //             gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
-                //             return true;
-                //         }
-                //         Some(ref recv) => recv.clone(),
-                //     };
-                //     let pNDI_recv = recv.recv;
-                //     NDIlib_recv_destroy(pNDI_recv);
-                //     //NDIlib_destroy();
-                // }
-                stop_ndi();
-                // Commented because when adding ndi destroy stopped in this line
-                //*self.state.lock().unwrap() = Default::default();
-                self.unlock(element);
-                gst_info!(self.cat, obj: element, "Stopped");
+            true
+        }
 
-                true
-            }
-
-            fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
-                //We need to set the correct caps resolution and framerate
-                let state = self.state.lock().unwrap();
-                // let recv = match state.recv{
-                //     None => {
-                //         //TODO Update gst_element_error with one more descriptive
-                //         //println!("pNDI_recv no encontrado");
-                //         gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
-                //         //TODO if none not return anything
-                //         return caps;
-                //     }
-                //     Some(ref recv) => recv.clone(),
-                // };
-                // let pNDI_recv = recv.recv;
-                unsafe{
-                let recv = match ndi2.recv{
+        fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
+            //We need to set the correct caps resolution and framerate
+            unsafe{
+                let recv = match ndi_struct.recv{
                     None => {
                         //TODO Update gst_element_error with one more descriptive
                         //println!("pNDI_recv no encontrado");
@@ -570,21 +302,13 @@ impl NdiAudioSrc {
 
                 let pNDI_recv = recv.recv;
                 let mut pts2 = self.pts.lock().unwrap();
-                let mut pts: u64 = 0;
 
-                // let video_frame: NDIlib_video_frame_v2_t = Default::default();
                 let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
-                // let metadata_frame: NDIlib_metadata_frame_t = Default::default();
-                //let audio_frame: NDIlib_audio_frame_v2_t = get_frame(self, element, pNDI_recv, &mut pts2.pts, &mut pts);
-                //get_frame(element, pNDI_recv, &video_frame, &audio_frame, &metadata_frame, &mut pts2.pts, &mut pts);
-
                 let mut frame_type: NDIlib_frame_type_e = NDIlib_frame_type_e::NDIlib_frame_type_none;
-                while (frame_type != NDIlib_frame_type_e::NDIlib_frame_type_audio){
+                while frame_type != NDIlib_frame_type_e::NDIlib_frame_type_audio{
                     frame_type = NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000);
                 }
-                println!("{:?}", audio_frame.timecode);
                 pts2.pts = (audio_frame.timecode as u64) * 100;
-                pts = 0;
 
                 let mut caps = gst::Caps::truncate(caps);
                 {
@@ -601,42 +325,30 @@ impl NdiAudioSrc {
             }
         }
 
-            //Creates the audio buffers
-            fn create(
-                &self,
-                element: &BaseSrc,
-                _offset: u64,
-                _length: u32,
-            ) -> Result<gst::Buffer, gst::FlowReturn> {
-                // Keep a local copy of the values of all our properties at this very moment. This
-                // ensures that the mutex is never locked for long and the application wouldn't
-                // have to block until this function returns when getting/setting property values
-                let _settings = &*self.settings.lock().unwrap();
+        //Creates the audio buffers
+        fn create(
+            &self,
+            element: &BaseSrc,
+            _offset: u64,
+            _length: u32,
+        ) -> Result<gst::Buffer, gst::FlowReturn> {
+            // Keep a local copy of the values of all our properties at this very moment. This
+            // ensures that the mutex is never locked for long and the application wouldn't
+            // have to block until this function returns when getting/setting property values
+            let _settings = &*self.settings.lock().unwrap();
 
-                let mut pts2 = self.pts.lock().unwrap();
-                // Get a locked reference to our state, i.e. the input and output AudioInfo
-                let state = self.state.lock().unwrap();
-                let _info = match state.info {
-                    None => {
-                        gst_element_error!(element, gst::CoreError::Negotiation, ["Have no caps yet"]);
-                        return Err(gst::FlowReturn::NotNegotiated);
-                    }
-                    Some(ref info) => info.clone(),
-                };
-                //let mut pNDI_recva = ptr::null();
-                // {
-                // let recv = match state.recv{
-                //     None => {
-                //         //TODO Update gst_element_error with one more descriptive
-                //         //println!("pNDI_recv no encontrado");
-                //         gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
-                //         return Err(gst::FlowReturn::NotNegotiated);
-                //     }
-                //     Some(ref recv) => recv.clone(),
-                // };
-                // let pNDI_recv = recv.recv;
-                unsafe{
-                let recv = match ndi2.recv{
+            let mut pts2 = self.pts.lock().unwrap();
+            // Get a locked reference to our state, i.e. the input and output AudioInfo
+            let state = self.state.lock().unwrap();
+            let _info = match state.info {
+                None => {
+                    gst_element_error!(element, gst::CoreError::Negotiation, ["Have no caps yet"]);
+                    return Err(gst::FlowReturn::NotNegotiated);
+                }
+                Some(ref info) => info.clone(),
+            };
+            unsafe{
+                let recv = match ndi_struct.recv{
                     None => {
                         //TODO Update gst_element_error with one more descriptive
                         //println!("pNDI_recv no encontrado");
@@ -646,116 +358,92 @@ impl NdiAudioSrc {
                     Some(ref recv) => recv.clone(),
                 };
                 let pNDI_recv = recv.recv;
+                let pts: u64;
+                let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
 
-
-                // }
-
-                // let start_pts = match state.start_pts {
-                //     None => {
-                //         gst_element_error!(element, gst::CoreError::Negotiation, ["Have no caps yet"]);
-                //         return Err(gst::FlowReturn::NotNegotiated);
-                //     }
-                //     Some(ref start_pts) => start_pts.clone(),
-                // };
-                let start_pts = match ndi2.start_pts {
-                    None => {
-                        gst_element_error!(element, gst::CoreError::Negotiation, ["Have no caps yet"]);
-                        return Err(gst::FlowReturn::NotNegotiated);
-                    }
-                    Some(ref start_pts) => start_pts.clone(),
-                };
-
-                unsafe{
-                    // // loop {
-                    let mut pts: u64 = 0;
-                    // let video_frame: NDIlib_video_frame_v2_t = Default::default();
-                    //let audio_frame: NDIlib_audio_frame_v2_t = get_frame(self, element, pNDI_recv, &mut pts2.pts, &mut pts);
-                    let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
-                    // let metadata_frame: NDIlib_metadata_frame_t = Default::default();
-                    //get_frame(element, pNDI_recv, &video_frame, &audio_frame, &metadata_frame, &mut pts2.pts, &mut pts);
-                    NDIlib_recv_capture_v2(
-                        pNDI_recv,
-                        ptr::null(),
-                        &audio_frame,
-                        ptr::null(),
-                        1000,
-                    );
-                    pts = (((audio_frame.timecode as u64) * 100) - pts2.pts);
-                    let buff_size = ((audio_frame.channel_stride_in_bytes)) as usize;
-                    let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
-                    {
-                        let  vec = Vec::from_raw_parts(audio_frame.p_data as *mut u8, buff_size, buff_size);
-                        //TODO Set pts, duration and other info about the buffer
-                        let pts: gst::ClockTime = (pts).into();
-                        let duration: gst::ClockTime = (20154200).into();
-                        let buffer = buffer.get_mut().unwrap();
-                        buffer.set_pts(pts);
-                        //buffer.set_duration(duration);
-                        buffer.set_offset(pts2.offset);
-                        buffer.set_offset_end(pts2.offset + 1);
-                        pts2.offset = pts2.offset +1;
-                        buffer.copy_from_slice(0, &vec).unwrap();
-                    }
-
-                    gst_debug!(self.cat, obj: element, "Produced buffer {:?}", buffer);
-                    Ok(buffer)
+                NDIlib_recv_capture_v2(
+                    pNDI_recv,
+                    ptr::null(),
+                    &audio_frame,
+                    ptr::null(),
+                    1000,
+                );
+                pts = ((audio_frame.timecode as u64) * 100) - pts2.pts;
+                let buff_size = ((audio_frame.channel_stride_in_bytes)) as usize;
+                let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
+                {
+                    let  vec = Vec::from_raw_parts(audio_frame.p_data as *mut u8, buff_size, buff_size);
+                    //TODO Set pts, duration and other info about the buffer
+                    let pts: gst::ClockTime = (pts).into();
+                    let duration: gst::ClockTime = (20154200).into();
+                    let buffer = buffer.get_mut().unwrap();
+                    buffer.set_pts(pts);
+                    buffer.set_duration(duration);
+                    buffer.set_offset(pts2.offset);
+                    buffer.set_offset_end(pts2.offset + 1);
+                    pts2.offset = pts2.offset +1;
+                    buffer.copy_from_slice(0, &vec).unwrap();
                 }
-                }
+
+                gst_debug!(self.cat, obj: element, "Produced buffer {:?}", buffer);
+                Ok(buffer)
             }
 
-
-            fn unlock(&self, element: &BaseSrc) -> bool {
-                // This should unblock the create() function ASAP, so we
-                // just unschedule the clock it here, if any.
-                gst_debug!(self.cat, obj: element, "Unlocking");
-                let mut clock_wait = self.clock_wait.lock().unwrap();
-                if let Some(clock_id) = clock_wait.clock_id.take() {
-                    clock_id.unschedule();
-                }
-                clock_wait.flushing = true;
-
-                true
-            }
-
-            fn unlock_stop(&self, element: &BaseSrc) -> bool {
-                // This signals that unlocking is done, so we can reset
-                // all values again.
-                gst_debug!(self.cat, obj: element, "Unlock stop");
-                let mut clock_wait = self.clock_wait.lock().unwrap();
-                clock_wait.flushing = false;
-
-                true
-            }
         }
 
-        // This zero-sized struct is containing the static metadata of our element. It is only necessary to
-        // be able to implement traits on it, but e.g. a plugin that registers multiple elements with the
-        // same code would use this struct to store information about the concrete element. An example of
-        // this would be a plugin that wraps around a library that has multiple decoders with the same API,
-        // but wants (as it should) a separate element registered for each decoder.
-        struct NdiAudioSrcStatic;
 
-        // The basic trait for registering the type: This returns a name for the type and registers the
-        // instance and class initializations functions with the type system, thus hooking everything
-        // together.
-        impl ImplTypeStatic<BaseSrc> for NdiAudioSrcStatic {
-            fn get_name(&self) -> &str {
-                "NdiAudioSrc"
+        fn unlock(&self, element: &BaseSrc) -> bool {
+            // This should unblock the create() function ASAP, so we
+            // just unschedule the clock it here, if any.
+            gst_debug!(self.cat, obj: element, "Unlocking");
+            let mut clock_wait = self.clock_wait.lock().unwrap();
+            if let Some(clock_id) = clock_wait.clock_id.take() {
+                clock_id.unschedule();
             }
+            clock_wait.flushing = true;
 
-            fn new(&self, element: &BaseSrc) -> Box<BaseSrcImpl<BaseSrc>> {
-                NdiAudioSrc::new(element)
-            }
-
-            fn class_init(&self, klass: &mut BaseSrcClass) {
-                NdiAudioSrc::class_init(klass);
-            }
+            true
         }
 
-        // Registers the type for our element, and then registers in GStreamer under
-        // the name NdiAudioSrc for being able to instantiate it via e.g.
-        // gst::ElementFactory::make().
-        pub fn register(plugin: &gst::Plugin) {
-            let type_ = register_type(NdiAudioSrcStatic);
-            gst::Element::register(plugin, "ndiaudiosrc", 0, type_);
+        fn unlock_stop(&self, element: &BaseSrc) -> bool {
+            // This signals that unlocking is done, so we can reset
+            // all values again.
+            gst_debug!(self.cat, obj: element, "Unlock stop");
+            let mut clock_wait = self.clock_wait.lock().unwrap();
+            clock_wait.flushing = false;
+
+            true
         }
+    }
+
+    // This zero-sized struct is containing the static metadata of our element. It is only necessary to
+    // be able to implement traits on it, but e.g. a plugin that registers multiple elements with the
+    // same code would use this struct to store information about the concrete element. An example of
+    // this would be a plugin that wraps around a library that has multiple decoders with the same API,
+    // but wants (as it should) a separate element registered for each decoder.
+    struct NdiAudioSrcStatic;
+
+    // The basic trait for registering the type: This returns a name for the type and registers the
+    // instance and class initializations functions with the type system, thus hooking everything
+    // together.
+    impl ImplTypeStatic<BaseSrc> for NdiAudioSrcStatic {
+        fn get_name(&self) -> &str {
+            "NdiAudioSrc"
+        }
+
+        fn new(&self, element: &BaseSrc) -> Box<BaseSrcImpl<BaseSrc>> {
+            NdiAudioSrc::new(element)
+        }
+
+        fn class_init(&self, klass: &mut BaseSrcClass) {
+            NdiAudioSrc::class_init(klass);
+        }
+    }
+
+    // Registers the type for our element, and then registers in GStreamer under
+    // the name NdiAudioSrc for being able to instantiate it via e.g.
+    // gst::ElementFactory::make().
+    pub fn register(plugin: &gst::Plugin) {
+        let type_ = register_type(NdiAudioSrcStatic);
+        gst::Element::register(plugin, "ndiaudiosrc", 0, type_);
+    }
