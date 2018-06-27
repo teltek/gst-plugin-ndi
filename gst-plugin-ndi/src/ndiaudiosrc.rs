@@ -294,7 +294,7 @@ impl NdiAudioSrc {
                 while frame_type != NDIlib_frame_type_e::NDIlib_frame_type_audio{
                     frame_type = NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000);
                 }
-                timestamp_data.pts = (audio_frame.timecode as u64) * 100;
+                timestamp_data.pts = audio_frame.timecode as u64;
 
                 let mut caps = gst::Caps::truncate(caps);
                 {
@@ -348,21 +348,21 @@ impl NdiAudioSrc {
 
                 let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
                 NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000,);
-                pts = ((audio_frame.timecode as u64) * 100) - timestamp_data.pts;
+                pts = (audio_frame.timecode as u64) - timestamp_data.pts;
 
                 let buff_size = ((audio_frame.channel_stride_in_bytes)) as usize;
                 let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
                 {
                     let  vec = Vec::from_raw_parts(audio_frame.p_data as *mut u8, buff_size, buff_size);
                     //TODO Set pts, duration and other info about the buffer
-                    let pts: gst::ClockTime = (pts).into();
+                    let pts: gst::ClockTime = (pts * 100).into();
                     let duration: gst::ClockTime = (20154200).into();
                     let buffer = buffer.get_mut().unwrap();
                     buffer.set_pts(pts);
                     buffer.set_duration(duration);
                     buffer.set_offset(timestamp_data.offset);
                     buffer.set_offset_end(timestamp_data.offset + 1);
-                    timestamp_data.offset = timestamp_data.offset +1;
+                    timestamp_data.offset = timestamp_data.offset + 1;
                     buffer.copy_from_slice(0, &vec).unwrap();
                 }
 

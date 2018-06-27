@@ -301,8 +301,8 @@ impl NdiVideoSrc {
                 while frame_type != NDIlib_frame_type_e::NDIlib_frame_type_video{
                     frame_type = NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000);
                 }
-                //FIXME It's possible than timecode not exist
-                timestamp_data.pts = (video_frame.timecode as u64) * 100;
+
+                timestamp_data.pts = video_frame.timecode as u64;
 
                 let mut caps = gst::Caps::truncate(caps);
                 {
@@ -356,15 +356,14 @@ impl NdiVideoSrc {
                 let pts: u64;
                 let video_frame: NDIlib_video_frame_v2_t = Default::default();
                 NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000,);
-                //TODO It's possible than timecode not exist
-                pts = ((video_frame.timecode as u64) * 100) - timestamp_data.pts;
+                pts = (video_frame.timecode as u64) - timestamp_data.pts;
 
                 let buff_size = (video_frame.yres * video_frame.line_stride_in_bytes) as usize;
                 //println!("{:?}", buff_size);
                 let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
                 {
                     let vec = Vec::from_raw_parts(video_frame.p_data as *mut u8, buff_size, buff_size);
-                    let pts: gst::ClockTime = (pts).into();
+                    let pts: gst::ClockTime = (pts * 100).into();
                     //TODO get duration
                     let duration: gst::ClockTime = (40000000).into();
                     let buffer = buffer.get_mut().unwrap();
@@ -372,7 +371,7 @@ impl NdiVideoSrc {
                     buffer.set_duration(duration);
                     buffer.set_offset(timestamp_data.offset);
                     buffer.set_offset_end(timestamp_data.offset + 1);
-                    timestamp_data.offset = timestamp_data.offset +1;
+                    timestamp_data.offset = timestamp_data.offset + 1;
                     buffer.copy_from_slice(0, &vec).unwrap();
 
                 }
