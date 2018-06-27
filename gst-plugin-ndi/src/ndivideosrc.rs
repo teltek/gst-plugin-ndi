@@ -70,11 +70,7 @@ impl Default for State {
     }
 }
 
-struct ClockWait {
-    clock_id: Option<gst::ClockId>,
-    flushing: bool,
-}
-struct Pts{
+struct TimestampData{
     pts: u64,
     offset: u64,
 }
@@ -84,8 +80,7 @@ struct NdiVideoSrc {
     cat: gst::DebugCategory,
     settings: Mutex<Settings>,
     state: Mutex<State>,
-    clock_wait: Mutex<ClockWait>,
-    pts: Mutex<Pts>,
+    timestamp_data: Mutex<TimestampData>,
 }
 
 impl NdiVideoSrc {
@@ -104,11 +99,7 @@ impl NdiVideoSrc {
             ),
             settings: Mutex::new(Default::default()),
             state: Mutex::new(Default::default()),
-            clock_wait: Mutex::new(ClockWait {
-                clock_id: None,
-                flushing: true,
-            }),
-            pts: Mutex::new(Pts{
+            timestamp_data: Mutex::new(TimestampData{
                 pts: 0,
                 offset: 0,
             }),
@@ -188,7 +179,7 @@ impl NdiVideoSrc {
                 Property::String("stream-name", ..) => {
                     let mut settings = self.settings.lock().unwrap();
                     let stream_name = value.get().unwrap();
-                    gst_warning!(
+                    gst_debug!(
                         self.cat,
                         obj: &element,
                         "Changing stream-name from {} to {}",
@@ -204,7 +195,7 @@ impl NdiVideoSrc {
                 Property::String("ip", ..) => {
                     let mut settings = self.settings.lock().unwrap();
                     let ip = value.get().unwrap();
-                    gst_warning!(
+                    gst_debug!(
                         self.cat,
                         obj: &element,
                         "Changing ip from {} to {}",
@@ -229,12 +220,10 @@ impl NdiVideoSrc {
             match *prop {
                 Property::String("stream-name", ..) => {
                     let settings = self.settings.lock().unwrap();
-                    //TODO to_value supongo que solo funciona con numeros
                     Ok(settings.stream_name.to_value())
                 },
                 Property::String("ip", ..) => {
                     let settings = self.settings.lock().unwrap();
-                    //TODO to_value supongo que solo funciona con numeros
                     Ok(settings.ip.to_value())
                 }
                 _ => unimplemented!(),
@@ -274,23 +263,18 @@ impl NdiVideoSrc {
         fn start(&self, element: &BaseSrc) -> bool {
             // Reset state
             *self.state.lock().unwrap() = Default::default();
-            self.unlock_stop(element);
 
-            gst_warning!(self.cat, obj: element, "Starting");
             let settings = self.settings.lock().unwrap();
-            return connect_ndi(element, settings.ip.clone(), settings.stream_name.clone());
+            return connect_ndi(self.cat, element, settings.ip.clone(), settings.stream_name.clone());
         }
 
         // Called when shutting down the element so we can release all stream-related state
         fn stop(&self, element: &BaseSrc) -> bool {
             // Reset state
             *self.state.lock().unwrap() = Default::default();
-            stop_ndi();
+            stop_ndi(self.cat, element);
             // Commented because when adding ndi destroy stopped in this line
             //*self.state.lock().unwrap() = Default::default();
-            self.unlock(element);
-            gst_info!(self.cat, obj: element, "Stopped");
-
             true
         }
 
@@ -309,14 +293,16 @@ impl NdiVideoSrc {
                 };
 
                 let pNDI_recv = recv.recv;
-                let mut pts2 = self.pts.lock().unwrap();
+                let mut timestamp_data = self.timestamp_data.lock().unwrap();
 
                 let video_frame: NDIlib_video_frame_v2_t = Default::default();
+
                 let mut frame_type: NDIlib_frame_type_e = NDIlib_frame_type_e::NDIlib_frame_type_none;
                 while frame_type != NDIlib_frame_type_e::NDIlib_frame_type_video{
                     frame_type = NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000);
                 }
-                pts2.pts = (video_frame.timecode as u64) * 100;
+                //FIXME It's possible than timecode not exist
+                timestamp_data.pts = (video_frame.timecode as u64) * 100;
 
                 let mut caps = gst::Caps::truncate(caps);
                 {
@@ -325,9 +311,6 @@ impl NdiVideoSrc {
                     s.fixate_field_nearest_int("width", video_frame.xres);
                     s.fixate_field_nearest_int("height", video_frame.yres);
                     s.fixate_field_nearest_fraction("framerate", Fraction::new(video_frame.frame_rate_N, video_frame.frame_rate_D));
-                    //s.fixate_field_str("format", &gst_video::VideoFormat::Rgb.to_string());
-                    //caps.set_simple(&[("width", &(1600 as i32))]);
-                    //s.set_value("width", &(1600 as i32));
                 }
 
                 // Let BaseSrc fixate anything else for us. We could've alternatively have
@@ -336,7 +319,7 @@ impl NdiVideoSrc {
             }
         }
 
-        //Creates the audio buffers
+        //Creates the video buffers
         fn create(
             &self,
             element: &BaseSrc,
@@ -348,7 +331,7 @@ impl NdiVideoSrc {
             // have to block until this function returns when getting/setting property values
             let _settings = &*self.settings.lock().unwrap();
 
-            let mut pts2 = self.pts.lock().unwrap();
+            let mut timestamp_data = self.timestamp_data.lock().unwrap();
             // Get a locked reference to our state, i.e. the input and output AudioInfo
             let state = self.state.lock().unwrap();
             let _info = match state.info {
@@ -372,15 +355,9 @@ impl NdiVideoSrc {
 
                 let pts: u64;
                 let video_frame: NDIlib_video_frame_v2_t = Default::default();
-
-                NDIlib_recv_capture_v2(
-                    pNDI_recv,
-                    &video_frame,
-                    ptr::null(),
-                    ptr::null(),
-                    1000,
-                );
-                pts = ((video_frame.timecode as u64) * 100) - pts2.pts;
+                NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000,);
+                //TODO It's possible than timecode not exist
+                pts = ((video_frame.timecode as u64) * 100) - timestamp_data.pts;
 
                 let buff_size = (video_frame.yres * video_frame.line_stride_in_bytes) as usize;
                 //println!("{:?}", buff_size);
@@ -393,9 +370,9 @@ impl NdiVideoSrc {
                     let buffer = buffer.get_mut().unwrap();
                     buffer.set_pts(pts);
                     buffer.set_duration(duration);
-                    buffer.set_offset(pts2.offset);
-                    buffer.set_offset_end(pts2.offset + 1);
-                    pts2.offset = pts2.offset +1;
+                    buffer.set_offset(timestamp_data.offset);
+                    buffer.set_offset_end(timestamp_data.offset + 1);
+                    timestamp_data.offset = timestamp_data.offset +1;
                     buffer.copy_from_slice(0, &vec).unwrap();
 
                 }
@@ -403,31 +380,6 @@ impl NdiVideoSrc {
                 gst_debug!(self.cat, obj: element, "Produced buffer {:?}", buffer);
                 Ok(buffer)
             }
-        }
-
-
-
-        fn unlock(&self, element: &BaseSrc) -> bool {
-            // This should unblock the create() function ASAP, so we
-            // just unschedule the clock it here, if any.
-            gst_debug!(self.cat, obj: element, "Unlocking");
-            let mut clock_wait = self.clock_wait.lock().unwrap();
-            if let Some(clock_id) = clock_wait.clock_id.take() {
-                clock_id.unschedule();
-            }
-            clock_wait.flushing = true;
-
-            true
-        }
-
-        fn unlock_stop(&self, element: &BaseSrc) -> bool {
-            // This signals that unlocking is done, so we can reset
-            // all values again.
-            gst_debug!(self.cat, obj: element, "Unlock stop");
-            let mut clock_wait = self.clock_wait.lock().unwrap();
-            clock_wait.flushing = false;
-
-            true
         }
     }
 

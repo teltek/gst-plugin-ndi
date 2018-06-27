@@ -17,6 +17,7 @@ extern "C" {
     ) -> NDIlib_recv_instance_t;
     pub fn NDIlib_find_destroy(p_instance: NDIlib_recv_instance_t);
     pub fn NDIlib_recv_destroy(p_instance: NDIlib_recv_instance_t);
+    pub fn NDIlib_destroy();
     pub fn NDIlib_recv_set_tally(
         p_instance: NDIlib_recv_instance_t,
         p_tally: *const NDIlib_tally_t,
