@@ -43,12 +43,12 @@ fn plugin_init(plugin: &gst::Plugin) -> bool {
 
 struct Ndi{
     recv: Option<NdiInstance>,
-    //start_pts: Option<u64>,
+    start_pts: u64,
 }
 
 static mut ndi_struct: Ndi = Ndi{
     recv: None,
-    //start_pts: None,
+    start_pts: 0,
 };
 
 fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream_name: String) -> bool{

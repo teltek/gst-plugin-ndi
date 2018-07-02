@@ -302,7 +302,8 @@ impl NdiVideoSrc {
                     frame_type = NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000);
                 }
 
-                timestamp_data.pts = video_frame.timecode as u64;
+                //timestamp_data.pts = video_frame.timecode as u64;
+                ndi_struct.start_pts = video_frame.timecode as u64;
 
                 let mut caps = gst::Caps::truncate(caps);
                 {
@@ -356,16 +357,20 @@ impl NdiVideoSrc {
                 let pts: u64;
                 let video_frame: NDIlib_video_frame_v2_t = Default::default();
                 NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000,);
-                pts = (video_frame.timecode as u64) - timestamp_data.pts;
+                //pts = (video_frame.timecode as u64) - timestamp_data.pts;
 
+                pts = (video_frame.timecode as u64) - ndi_struct.start_pts;
                 let buff_size = (video_frame.yres * video_frame.line_stride_in_bytes) as usize;
                 //println!("{:?}", buff_size);
                 let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
                 {
                     let vec = Vec::from_raw_parts(video_frame.p_data as *mut u8, buff_size, buff_size);
                     let pts: gst::ClockTime = (pts * 100).into();
+
+                    // println!("{:?}", video_frame.line_stride_in_bytes);
+                    //println!("{:?}", video_frame);
                     //TODO get duration
-                    let duration: gst::ClockTime = (40000000).into();
+                    let duration: gst::ClockTime = (33333333).into();
                     let buffer = buffer.get_mut().unwrap();
                     buffer.set_pts(pts);
                     buffer.set_duration(duration);

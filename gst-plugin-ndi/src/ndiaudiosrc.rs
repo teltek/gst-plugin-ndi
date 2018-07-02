@@ -294,7 +294,8 @@ impl NdiAudioSrc {
                 while frame_type != NDIlib_frame_type_e::NDIlib_frame_type_audio{
                     frame_type = NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000);
                 }
-                timestamp_data.pts = audio_frame.timecode as u64;
+                ndi_struct.start_pts = audio_frame.timecode as u64;
+                //timestamp_data.pts = audio_frame.timecode as u64;
 
                 let mut caps = gst::Caps::truncate(caps);
                 {
@@ -348,7 +349,8 @@ impl NdiAudioSrc {
 
                 let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
                 NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000,);
-                pts = (audio_frame.timecode as u64) - timestamp_data.pts;
+                //pts = (audio_frame.timecode as u64) - timestamp_data.pts;
+                pts = (audio_frame.timecode as u64) - ndi_struct.start_pts;
 
                 let buff_size = ((audio_frame.channel_stride_in_bytes)) as usize;
                 let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
