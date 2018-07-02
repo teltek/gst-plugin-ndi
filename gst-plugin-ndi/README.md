@@ -34,4 +34,9 @@ GST_DEBUG=3 gst-launch-1.0 -v ndisrc ip=10.21.10.103:5961 ! video/x-raw, format=
 or
 
 GST_DEBUG=3 gst-launch-1.0 -v ndisrc stream-name="MINI-DE-TELTEK.OFICINA.TELTEK.ES (NDI Signal Generator)" ! video/x-raw, format=UYVY, width=1920, height=1080, framerate=25/1 ! autovideosink sync=false
+
+gst-launch-1.0 -v ndivideosrc name=gc-ndi-src stream-name="GC-DEV2 (OBS)" ! autovideosink ts-offset=1000000000
+gst-launch-1.0 -v ndivideosrc name=gc-ndi-src stream-name="GC-DEV2 (OBS)" ! fakesink silent=false
+GST_DEBUG=*basesink*:5 gst-launch-1.0 -v ndivideosrc name=gc-ndi-src stream-name="GC-DEV2 (OBS)" ! autovideosink
+
 ```
