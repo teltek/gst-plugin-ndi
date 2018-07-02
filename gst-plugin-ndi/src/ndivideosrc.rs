@@ -278,6 +278,49 @@ impl NdiVideoSrc {
             true
         }
 
+
+        fn query(&self, element: &BaseSrc, query: &mut gst::QueryRef) -> bool {
+            use gst::QueryView;
+
+            match query.view_mut() {
+                // We only work in Push mode. In Pull mode, create() could be called with
+                // arbitrary offsets and we would have to produce for that specific offset
+                QueryView::Scheduling(ref mut q) => {
+                    q.set(gst::SchedulingFlags::SEQUENTIAL, 1, -1, 0);
+                    q.add_scheduling_modes(&[gst::PadMode::Push]);
+                    return true;
+                }
+                // In Live mode we will have a latency equal to the number of samples in each buffer.
+                // We can't output samples before they were produced, and the last sample of a buffer
+                // is produced that much after the beginning, leading to this latency calculation
+                QueryView::Latency(ref mut q) => {
+                    //let settings = *self.settings.lock().unwrap();
+                    let state = self.state.lock().unwrap();
+
+                    if let Some(ref info) = state.info {
+                        // let latency = gst::SECOND
+                        // .mul_div_floor(settings.samples_per_buffer as u64, info.rate() as u64)
+                        // .unwrap();
+                        let latency = gst::SECOND.mul_div_floor(3 as u64, 2 as u64).unwrap();
+                        // let latency = gst::SECOND
+                        // .mul_div_floor(1 as u64, 30 as u64)
+                        // .unwrap();
+                        // gst_debug!(self.cat, obj: element, "Returning latency {}", latency);
+                        println!("/*/a*f/a*sd/f*ad/sf*ad/sf*ad/sf");
+                        let max = latency * 1843200;
+                        println!("{:?}", latency);
+                        println!("{:?}",max);
+                        q.set(true, latency, max);
+                        return true;
+                    } else {
+                        return false;
+                    }
+                }
+                _ => (),
+            }
+            BaseSrcBase::parent_query(element, query)
+        }
+
         fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
             //We need to set the correct caps resolution and framerate
             unsafe{
