@@ -400,7 +400,7 @@ impl NdiAudioSrc {
                     let  vec = Vec::from_raw_parts(audio_frame.p_data as *mut u8, buff_size, buff_size);
                     //TODO Set pts, duration and other info about the buffer
                     let pts: gst::ClockTime = (pts * 100).into();
-                    let duration: gst::ClockTime = (20154200).into();
+                    let duration: gst::ClockTime = (((audio_frame.no_samples as f64 / audio_frame.sample_rate as f64) * 10000000.0) as u64).into();
                     let buffer = buffer.get_mut().unwrap();
                     buffer.set_pts(pts);
                     buffer.set_duration(duration);

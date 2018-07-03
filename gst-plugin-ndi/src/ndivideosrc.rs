@@ -413,7 +413,7 @@ impl NdiVideoSrc {
                     // println!("{:?}", video_frame.line_stride_in_bytes);
                     //println!("{:?}", video_frame);
                     //TODO get duration
-                    let duration: gst::ClockTime = (33333333).into();
+                    let duration: gst::ClockTime = (((video_frame.frame_rate_D as f64 / video_frame.frame_rate_N as f64) * 1000000000.0) as u64).into();
                     let buffer = buffer.get_mut().unwrap();
                     buffer.set_pts(pts);
                     buffer.set_duration(duration);
