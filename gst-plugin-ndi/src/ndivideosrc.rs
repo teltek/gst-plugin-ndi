@@ -19,8 +19,10 @@ use std::ptr;
 
 use ndilib::*;
 use connect_ndi;
-use ndi_struct;
+// use ndi_struct;
 use stop_ndi;
+
+use hashmap_receivers;
 
 // Property value storage
 #[derive(Debug, Clone)]
@@ -324,16 +326,14 @@ impl NdiVideoSrc {
         fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
             //We need to set the correct caps resolution and framerate
             unsafe{
-                let recv = match ndi_struct.recv{
-                    None => {
-                        //TODO Update gst_element_error with one more descriptive
-                        //println!("pNDI_recv no encontrado");
-                        gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
-                        //TODO if none not return anything
-                        return caps;
-                    }
-                    Some(ref recv) => recv.clone(),
-                };
+                let map = hashmap_receivers.lock().unwrap();
+                let settings = self.settings.lock().unwrap();
+
+                let mut id = &settings.stream_name;
+                if (&settings.ip != ""){
+                    id = &settings.ip;
+                }
+                let recv = map.get(id).unwrap();
 
                 let pNDI_recv = recv.recv;
                 let mut timestamp_data = self.timestamp_data.lock().unwrap();
@@ -345,8 +345,9 @@ impl NdiVideoSrc {
                     frame_type = NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000);
                 }
 
-                //timestamp_data.pts = video_frame.timecode as u64;
-                ndi_struct.start_pts = video_frame.timecode as u64;
+                //TODO Check that this is working
+                timestamp_data.pts = video_frame.timecode as u64;
+                //ndi_struct.start_pts = video_frame.timecode as u64;
 
                 let mut caps = gst::Caps::truncate(caps);
                 {
@@ -386,23 +387,23 @@ impl NdiVideoSrc {
                 Some(ref info) => info.clone(),
             };
             unsafe{
-                let recv = match ndi_struct.recv{
-                    None => {
-                        //TODO Update gst_element_error with one more descriptive
-                        //println!("pNDI_recv no encontrado");
-                        gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
-                        return Err(gst::FlowReturn::NotNegotiated);
-                    }
-                    Some(ref recv) => recv.clone(),
-                };
+                let map = hashmap_receivers.lock().unwrap();
+                let mut id = &_settings.stream_name;
+
+                if (&_settings.ip != ""){
+                    id = &_settings.ip;
+                }
+                let recv = map.get(id).unwrap();
+
                 let pNDI_recv = recv.recv;
 
                 let pts: u64;
                 let video_frame: NDIlib_video_frame_v2_t = Default::default();
                 NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000,);
-                //pts = (video_frame.timecode as u64) - timestamp_data.pts;
 
-                pts = (video_frame.timecode as u64) - ndi_struct.start_pts;
+                pts = (video_frame.timecode as u64) - timestamp_data.pts;
+                //pts = (video_frame.timecode as u64) - ndi_struct.start_pts;
+
                 let buff_size = (video_frame.yres * video_frame.line_stride_in_bytes) as usize;
                 //println!("{:?}", buff_size);
                 let mut buffer = gst::Buffer::with_size(buff_size).unwrap();

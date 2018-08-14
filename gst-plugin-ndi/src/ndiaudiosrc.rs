@@ -18,8 +18,10 @@ use std::ptr;
 
 use ndilib::*;
 use connect_ndi;
-use ndi_struct;
+// use ndi_struct;
 use stop_ndi;
+
+use hashmap_receivers;
 
 // Property value storage
 #[derive(Debug, Clone)]
@@ -318,26 +320,27 @@ impl NdiAudioSrc {
         fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
             //We need to set the correct caps resolution and framerate
             unsafe{
-                let recv = match ndi_struct.recv{
-                    None => {
-                        //TODO Update gst_element_error with one more descriptive
-                        //println!("pNDI_recv no encontrado");
-                        gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
-                        return caps;
-                    }
-                    Some(ref recv) => recv.clone(),
-                };
+                let map = hashmap_receivers.lock().unwrap();
+                let settings = self.settings.lock().unwrap();
+
+                let mut id = &settings.stream_name;
+                if (&settings.ip != ""){
+                    id = &settings.ip;
+                }
+                let recv = map.get(id).unwrap();
 
                 let pNDI_recv = recv.recv;
                 let mut timestamp_data = self.timestamp_data.lock().unwrap();
 
                 let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
+
                 let mut frame_type: NDIlib_frame_type_e = NDIlib_frame_type_e::NDIlib_frame_type_none;
                 while frame_type != NDIlib_frame_type_e::NDIlib_frame_type_audio{
                     frame_type = NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000);
                 }
-                ndi_struct.start_pts = audio_frame.timecode as u64;
-                //timestamp_data.pts = audio_frame.timecode as u64;
+
+                //ndi_struct.start_pts = audio_frame.timecode as u64;
+                timestamp_data.pts = audio_frame.timecode as u64;
 
                 let mut caps = gst::Caps::truncate(caps);
                 {
@@ -377,22 +380,22 @@ impl NdiAudioSrc {
                 Some(ref info) => info.clone(),
             };
             unsafe{
-                let recv = match ndi_struct.recv{
-                    None => {
-                        //TODO Update gst_element_error with one more descriptive
-                        //println!("pNDI_recv no encontrado");
-                        gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
-                        return Err(gst::FlowReturn::NotNegotiated);
-                    }
-                    Some(ref recv) => recv.clone(),
-                };
-                let pNDI_recv = recv.recv;
-                let pts: u64;
+                let map = hashmap_receivers.lock().unwrap();
+                let mut id = &_settings.stream_name;
 
+                if (&_settings.ip != ""){
+                    id = &_settings.ip;
+                }
+                let recv = map.get(id).unwrap();
+
+                let pNDI_recv = recv.recv;
+
+                let pts: u64;
                 let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
                 NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000,);
-                //pts = (audio_frame.timecode as u64) - timestamp_data.pts;
-                pts = (audio_frame.timecode as u64) - ndi_struct.start_pts;
+
+                pts = (audio_frame.timecode as u64) - timestamp_data.pts;
+                //pts = (audio_frame.timecode as u64) - ndi_struct.start_pts;
 
                 let buff_size = ((audio_frame.channel_stride_in_bytes)) as usize;
                 let mut buffer = gst::Buffer::with_size(buff_size).unwrap();

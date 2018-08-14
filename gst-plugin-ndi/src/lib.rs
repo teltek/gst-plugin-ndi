@@ -19,6 +19,8 @@ extern crate gstreamer_video as gst_video;
 
 extern crate byte_slice_cast;
 extern crate num_traits;
+#[macro_use]
+extern crate lazy_static;
 
 mod ndivideosrc;
 mod ndiaudiosrc;
@@ -31,6 +33,8 @@ use std::ffi::{CStr, CString};
 use ndilib::*;
 use gst_plugin::base_src::*;
 
+use std::collections::HashMap;
+use std::sync::Mutex;
 
 // Plugin entry point that should register all elements provided by this plugin,
 // and everything else that this plugin might provide (e.g. typefinders or device providers).
@@ -39,7 +43,6 @@ fn plugin_init(plugin: &gst::Plugin) -> bool {
     ndiaudiosrc::register(plugin);
     true
 }
-
 
 struct Ndi{
     recv: Option<NdiInstance>,
@@ -51,16 +54,23 @@ static mut ndi_struct: Ndi = Ndi{
     start_pts: 0,
 };
 
+lazy_static! {
+    static ref hashmap_receivers: Mutex<HashMap<String, NdiInstance>> = {
+        let mut m = HashMap::new();
+        Mutex::new(m)
+    };
+}
+
 fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream_name: String) -> bool{
     unsafe {
         gst_debug!(cat, obj: element, "Starting NDI connection...");
-        match ndi_struct.recv {
-            None => {
-                //gst_element_error!(element, gst::CoreError::Negotiation, ["Have no caps yet"]);
-                //return true;
-            }
-            _ => return true,
-        };
+
+        let mut map = hashmap_receivers.lock().unwrap();
+        if (map.contains_key(&stream_name) || map.contains_key(&ip)){
+            println!("Already connected to {}{}", ip, stream_name);
+            return false;
+         }
+
         if !NDIlib_initialize() {
             gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_initialize error"]);
             return false;
@@ -73,7 +83,6 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
             let NDI_find_create_desc: NDIlib_find_create_t = Default::default();
             let pNDI_find = NDIlib_find_create_v2(&NDI_find_create_desc);
             let ip_ptr = CString::new(ip.clone()).unwrap();
-            if ip_ptr == CString::new("").unwrap(){
                 if pNDI_find.is_null() {
                     gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_find_create_v2 error"]);
                     return false;
@@ -94,9 +103,8 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
 
                 let mut no_source: isize = -1;
                 for i in 0..total_sources as isize{
-                    if CStr::from_ptr((*p_sources.offset(i)).p_ndi_name)
-                    .to_string_lossy()
-                    .into_owned() == stream_name{
+                    if (CStr::from_ptr((*p_sources.offset(i)).p_ndi_name).to_string_lossy().into_owned() == stream_name ||
+                    CStr::from_ptr((*p_sources.offset(i)).p_ip_address).to_string_lossy().into_owned() == ip){
                         no_source = i;
                         break;
                     }
@@ -115,14 +123,9 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
                 .into_owned());
 
                 source = *p_sources.offset(no_source).clone();
-            }
-            else{
-                source.p_ip_address = ip_ptr.as_ptr();
-                gst_debug!(cat, obj: element, "Connecting to NDI source with address '{}'", CStr::from_ptr(source.p_ip_address)
-                .to_string_lossy()
-                .into_owned()
-            );
-        }
+
+        let source_ip = CStr::from_ptr(source.p_ip_address).to_string_lossy().into_owned();
+        let source_name = CStr::from_ptr(source.p_ndi_name).to_string_lossy().into_owned();
 
         // We now have at least one source, so we create a receiver to look at it.
         // We tell it that we prefer YCbCr video since it is more efficient for us. If the source has an alpha channel
@@ -159,7 +162,9 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
         };
 
         NDIlib_recv_send_metadata(pNDI_recv, &enable_hw_accel);
-        ndi_struct.recv = Some(NdiInstance{recv: pNDI_recv});
+
+        map.insert(source_name.clone(), NdiInstance{recv: pNDI_recv});
+        map.insert(source_ip.clone(), NdiInstance{recv: pNDI_recv});
 
         // let start = SystemTime::now();
         // let since_the_epoch = start.duration_since(UNIX_EPOCH)
