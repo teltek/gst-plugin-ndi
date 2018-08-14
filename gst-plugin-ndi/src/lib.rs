@@ -36,6 +36,8 @@ use gst_plugin::base_src::*;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
+use gst::GstObjectExt;
+
 // Plugin entry point that should register all elements provided by this plugin,
 // and everything else that this plugin might provide (e.g. typefinders or device providers).
 fn plugin_init(plugin: &gst::Plugin) -> bool {
@@ -64,11 +66,31 @@ lazy_static! {
 fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream_name: String) -> bool{
     unsafe {
         gst_debug!(cat, obj: element, "Starting NDI connection...");
-
         let mut map = hashmap_receivers.lock().unwrap();
+
+        //FIXME It's possible to connect more than one source if an audiosrc is active
+        let mut audio = false;
+        if (element.get_name().contains("ndiaudiosrc")){
+            audio = true;
+        }
+
         if (map.contains_key(&stream_name) || map.contains_key(&ip)){
-            println!("Already connected to {}{}", ip, stream_name);
-            return false;
+            if (map.contains_key(&stream_name)){
+                let recv = map.get(&stream_name).unwrap();
+                audio = recv.audio;
+            }
+            else if (map.contains_key(&ip)){
+                let recv = map.get(&ip).unwrap();
+                audio = recv.audio;
+            }
+            if (audio){
+                println!("We already have an source, but we need to add an audio source to the pipeline. So we need to reutilize the source...");
+                return true;
+            }
+            else{
+                println!("Already connected to {}{}", ip, stream_name);
+                return false;
+            }
          }
 
         if !NDIlib_initialize() {
@@ -163,8 +185,8 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
 
         NDIlib_recv_send_metadata(pNDI_recv, &enable_hw_accel);
 
-        map.insert(source_name.clone(), NdiInstance{recv: pNDI_recv});
-        map.insert(source_ip.clone(), NdiInstance{recv: pNDI_recv});
+        map.insert(source_name.clone(), NdiInstance{recv: pNDI_recv, audio: audio});
+        map.insert(source_ip.clone(), NdiInstance{recv: pNDI_recv, audio: audio});
 
         // let start = SystemTime::now();
         // let since_the_epoch = start.duration_since(UNIX_EPOCH)
