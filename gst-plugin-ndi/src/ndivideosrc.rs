@@ -29,6 +29,7 @@ use hashmap_receivers;
 struct Settings {
     stream_name: String,
     ip: String,
+    id_receiver: i8,
 }
 
 impl Default for Settings {
@@ -36,6 +37,7 @@ impl Default for Settings {
         Settings {
             stream_name: String::from("Fixed ndi stream name"),
             ip: String::from(""),
+            id_receiver: 0,
         }
     }
 }
@@ -266,15 +268,23 @@ impl NdiVideoSrc {
             // Reset state
             *self.state.lock().unwrap() = Default::default();
 
-            let settings = self.settings.lock().unwrap();
-            return connect_ndi(self.cat, element, settings.ip.clone(), settings.stream_name.clone());
+            let mut settings = self.settings.lock().unwrap();
+            settings.id_receiver = connect_ndi(self.cat, element, settings.ip.clone(), settings.stream_name.clone());
+            if settings.id_receiver == 0{
+                return false;
+            }
+            else{
+                return true;
+            }
         }
 
         // Called when shutting down the element so we can release all stream-related state
         fn stop(&self, element: &BaseSrc) -> bool {
             // Reset state
             *self.state.lock().unwrap() = Default::default();
-            stop_ndi(self.cat, element);
+
+            let settings = self.settings.lock().unwrap();
+            stop_ndi(self.cat, element, settings.id_receiver.clone());
             // Commented because when adding ndi destroy stopped in this line
             //*self.state.lock().unwrap() = Default::default();
             true
@@ -326,16 +336,12 @@ impl NdiVideoSrc {
         fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
             //We need to set the correct caps resolution and framerate
             unsafe{
-                let map = hashmap_receivers.lock().unwrap();
+                let receivers = hashmap_receivers.lock().unwrap();
                 let settings = self.settings.lock().unwrap();
 
-                let mut id = &settings.stream_name;
-                if (&settings.ip != ""){
-                    id = &settings.ip;
-                }
-                let recv = map.get(id).unwrap();
-
+                let recv = &receivers.get(&settings.id_receiver).unwrap().ndi_instance;
                 let pNDI_recv = recv.recv;
+
                 let mut timestamp_data = self.timestamp_data.lock().unwrap();
 
                 let video_frame: NDIlib_video_frame_v2_t = Default::default();
@@ -387,14 +393,9 @@ impl NdiVideoSrc {
                 Some(ref info) => info.clone(),
             };
             unsafe{
-                let map = hashmap_receivers.lock().unwrap();
-                let mut id = &_settings.stream_name;
+                let receivers = hashmap_receivers.lock().unwrap();
 
-                if (&_settings.ip != ""){
-                    id = &_settings.ip;
-                }
-                let recv = map.get(id).unwrap();
-
+                let recv = &receivers.get(&_settings.id_receiver).unwrap().ndi_instance;
                 let pNDI_recv = recv.recv;
 
                 let pts: u64;

@@ -1,7 +1,7 @@
 [package]
 name = "gst-plugin-ndi"
 version = "0.1.0"
-authors = ["Ruben Gonzalez <rubenrua@teltek.es>"]
+authors = ["Ruben Gonzalez <rubenrua@teltek.es>", "Daniel Vilar <daniel.peiteado@teltek.es>"]
 repository = "https://gitlab.teltek.es/rubenrua/ndi-rs.git"
 license = "unknow" # TODO MIT/Apache-2.0
 
@@ -12,6 +12,7 @@ gstreamer = "0.11"
 gstreamer-base = "0.11"
 gstreamer-video = "0.11"
 gstreamer-audio = "0.11"
+lazy_static = "1.1.0"
 byte-slice-cast = "0.1" # TODO delete
 num-traits = "0.2" # TODO delete
 

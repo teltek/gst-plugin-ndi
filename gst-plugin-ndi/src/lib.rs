@@ -56,46 +56,64 @@ static mut ndi_struct: Ndi = Ndi{
     start_pts: 0,
 };
 
+struct ndi_receiver_info{
+    stream_name: String,
+    ip: String,
+    video: bool,
+    audio: bool,
+    ndi_instance: NdiInstance,
+    id: i8,
+}
+
 lazy_static! {
-    static ref hashmap_receivers: Mutex<HashMap<String, NdiInstance>> = {
+    static ref hashmap_receivers: Mutex<HashMap<i8, ndi_receiver_info>> = {
         let mut m = HashMap::new();
         Mutex::new(m)
     };
 }
 
-fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream_name: String) -> bool{
+static mut id_receiver: i8 = 0;
+
+fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream_name: String) -> i8{
     unsafe {
         gst_debug!(cat, obj: element, "Starting NDI connection...");
-        let mut map = hashmap_receivers.lock().unwrap();
 
-        //FIXME It's possible to connect more than one source if an audiosrc is active
+        let mut receivers = hashmap_receivers.lock().unwrap();
         let mut audio = false;
-        if (element.get_name().contains("ndiaudiosrc")){
+        let mut video = false;
+        id_receiver += 1;
+
+        //FIXME Search for another way to know if the source is an audio or a video source
+        if (element.get_name().contains("audiosrc")){
             audio = true;
         }
+        else
+        {
+            video = true;
+        }
 
-        if (map.contains_key(&stream_name) || map.contains_key(&ip)){
-            if (map.contains_key(&stream_name)){
-                let recv = map.get(&stream_name).unwrap();
-                audio = recv.audio;
+        for val in receivers.values_mut(){
+            if (val.ip == ip || val.stream_name == stream_name){
+                if ((val.audio && val.video) || (val.audio && audio) || (val.video && video)){
+                    break;
+                }
+                else {
+                    if (video){
+                        val.video = video;
+                    }
+                    else{
+                        val.audio = audio;
+                    }
+                    return val.id;
+                }
             }
-            else if (map.contains_key(&ip)){
-                let recv = map.get(&ip).unwrap();
-                audio = recv.audio;
-            }
-            if (audio){
-                println!("We already have an source, but we need to add an audio source to the pipeline. So we need to reutilize the source...");
-                return true;
-            }
-            else{
-                println!("Already connected to {}{}", ip, stream_name);
-                return false;
-            }
-         }
+
+        }
 
         if !NDIlib_initialize() {
             gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_initialize error"]);
-            return false;
+            // return false;
+            return 0;
         }
 
         let mut source: NDIlib_source_t = NDIlib_source_t{p_ndi_name: ptr::null(),
@@ -107,7 +125,8 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
             let ip_ptr = CString::new(ip.clone()).unwrap();
                 if pNDI_find.is_null() {
                     gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_find_create_v2 error"]);
-                    return false;
+                    // return false;
+                    return 0;
                 }
 
                 let mut total_sources: u32 = 0;
@@ -120,7 +139,8 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
                 // We need at least one source
                 if p_sources.is_null() {
                     gst_element_error!(element, gst::CoreError::Negotiation, ["Error getting NDIlib_find_get_current_sources"]);
-                    return false;
+                    // return false;
+                    return 0;
                 }
 
                 let mut no_source: isize = -1;
@@ -133,7 +153,8 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
                 }
                 if no_source  == -1 {
                     gst_element_error!(element, gst::CoreError::Negotiation, ["Stream name not found"]);
-                    return false;
+                    // return false;
+                    return 0;
                 }
 
                 gst_debug!(cat, obj: element, "Total sources in network {}: Connecting to NDI source with name '{}' and address '{}'", total_sources,
@@ -163,7 +184,8 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
         if pNDI_recv.is_null() {
             //println!("Cannot run NDI: NDIlib_recv_create_v3 error.");
             gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_recv_create_v3 error"]);
-            return false;
+            // return false;
+            return 0;
         }
 
         // Destroy the NDI finder. We needed to have access to the pointers to p_sources[0]
@@ -173,7 +195,7 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
         let tally_state: NDIlib_tally_t = Default::default();
         NDIlib_recv_set_tally(pNDI_recv, &tally_state);
 
-        // Enable Hardwqre Decompression support if this support has it. Please read the caveats in the documentation
+        // Enable Hardware Decompression support if this support has it. Please read the caveats in the documentation
         // regarding this. There are times in which it might reduce the performance although on small stream numbers
         // it almost always yields the same or better performance.
         let data = CString::new("<ndi_hwaccel enabled=\"true\"/>").unwrap();
@@ -185,8 +207,7 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
 
         NDIlib_recv_send_metadata(pNDI_recv, &enable_hw_accel);
 
-        map.insert(source_name.clone(), NdiInstance{recv: pNDI_recv, audio: audio});
-        map.insert(source_ip.clone(), NdiInstance{recv: pNDI_recv, audio: audio});
+        receivers.insert(id_receiver, ndi_receiver_info{stream_name: source_name.clone(), ip: source_ip.clone(), video:video, audio: audio, ndi_instance: NdiInstance{recv: pNDI_recv}, id: id_receiver});
 
         // let start = SystemTime::now();
         // let since_the_epoch = start.duration_since(UNIX_EPOCH)
@@ -195,26 +216,34 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
         // ndi_struct.start_pts = Some(since_the_epoch.as_secs() * 1000000000 +
         // since_the_epoch.subsec_nanos() as u64);
         gst_debug!(cat, obj: element, "Started NDI connection");
-        return true;
+        return id_receiver;
     }
 }
 
-fn stop_ndi(cat: gst::DebugCategory , element: &BaseSrc) -> bool{
+fn stop_ndi(cat: gst::DebugCategory , element: &BaseSrc, id: i8) -> bool{
     gst_debug!(cat, obj: element, "Closing NDI connection...");
     unsafe{
-        let recv = match ndi_struct.recv{
-            None => {
-                //TODO Update gst_element_error with one more descriptive
-                //println!("pNDI_recv no encontrado");
-                //gst_element_error!(element, gst::CoreError::Negotiation, ["No encontramos ndi recv"]);
+        let mut receivers = hashmap_receivers.lock().unwrap();
+
+        {
+            let val = receivers.get_mut(&id).unwrap();
+            if val.video && val.audio{
+                if (element.get_name().contains("audiosrc")){
+                    val.audio = false;
+                }
+                else{
+                    val.video = false;
+                }
                 return true;
             }
-            Some(ref recv) => recv.clone(),
-        };
-        let pNDI_recv = recv.recv;
-        NDIlib_recv_destroy(pNDI_recv);
-        ndi_struct.recv = None;
-        NDIlib_destroy();
+
+            let recv = &val.ndi_instance;
+            let pNDI_recv = recv.recv;
+            NDIlib_recv_destroy(pNDI_recv);
+            // ndi_struct.recv = None;
+            NDIlib_destroy();
+        }
+        receivers.remove(&id);
         gst_debug!(cat, obj: element, "Closed NDI connection");
         return true;
     }
