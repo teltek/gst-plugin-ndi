@@ -73,7 +73,6 @@ impl Default for State {
 }
 
 struct TimestampData{
-    pts: u64,
     offset: u64,
 }
 
@@ -102,7 +101,6 @@ impl NdiAudioSrc {
             settings: Mutex::new(Default::default()),
             state: Mutex::new(Default::default()),
             timestamp_data: Mutex::new(TimestampData{
-                pts: 0,
                 offset: 0,
             }),
         })
@@ -327,13 +325,12 @@ impl NdiAudioSrc {
         fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
             //We need to set the correct caps resolution and framerate
             unsafe{
-                let receivers = hashmap_receivers.lock().unwrap();
+                let mut receivers = hashmap_receivers.lock().unwrap();
                 let settings = self.settings.lock().unwrap();
 
-                let recv = &receivers.get(&settings.id_receiver).unwrap().ndi_instance;
+                let receiver = receivers.get_mut(&settings.id_receiver).unwrap();
+                let recv = &receiver.ndi_instance;
                 let pNDI_recv = recv.recv;
-
-                let mut timestamp_data = self.timestamp_data.lock().unwrap();
 
                 let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
 
@@ -342,7 +339,9 @@ impl NdiAudioSrc {
                     frame_type = NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000);
                 }
 
-                timestamp_data.pts = audio_frame.timecode as u64;
+                if receiver.timestamp >= audio_frame.timecode as u64 || receiver.timestamp == 0{
+                    receiver.timestamp = audio_frame.timecode as u64;
+                }
 
                 let mut caps = gst::Caps::truncate(caps);
                 {
@@ -391,7 +390,8 @@ impl NdiAudioSrc {
                 let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
                 NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000,);
 
-                pts = (audio_frame.timecode as u64) - timestamp_data.pts;
+                let time = &receivers.get(&_settings.id_receiver).unwrap().timestamp;
+                pts = audio_frame.timecode as u64- time;
 
                 let buff_size = ((audio_frame.channel_stride_in_bytes)) as usize;
                 let mut buffer = gst::Buffer::with_size(buff_size).unwrap();

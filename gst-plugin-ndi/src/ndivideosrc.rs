@@ -74,7 +74,6 @@ impl Default for State {
 }
 
 struct TimestampData{
-    pts: u64,
     offset: u64,
 }
 
@@ -103,7 +102,6 @@ impl NdiVideoSrc {
             settings: Mutex::new(Default::default()),
             state: Mutex::new(Default::default()),
             timestamp_data: Mutex::new(TimestampData{
-                pts: 0,
                 offset: 0,
             }),
         })
@@ -334,13 +332,12 @@ impl NdiVideoSrc {
         fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
             //We need to set the correct caps resolution and framerate
             unsafe{
-                let receivers = hashmap_receivers.lock().unwrap();
+                let mut receivers = hashmap_receivers.lock().unwrap();
                 let settings = self.settings.lock().unwrap();
 
-                let recv = &receivers.get(&settings.id_receiver).unwrap().ndi_instance;
+                let receiver = receivers.get_mut(&settings.id_receiver).unwrap();
+                let recv = &receiver.ndi_instance;
                 let pNDI_recv = recv.recv;
-
-                let mut timestamp_data = self.timestamp_data.lock().unwrap();
 
                 let video_frame: NDIlib_video_frame_v2_t = Default::default();
 
@@ -350,7 +347,9 @@ impl NdiVideoSrc {
                 }
 
                 //TODO Check that this is working
-                timestamp_data.pts = video_frame.timecode as u64;
+                if receiver.timestamp >= video_frame.timecode as u64 || receiver.timestamp == 0{
+                    receiver.timestamp = video_frame.timecode as u64;
+                }
 
                 let mut caps = gst::Caps::truncate(caps);
                 {
@@ -399,7 +398,8 @@ impl NdiVideoSrc {
                 let video_frame: NDIlib_video_frame_v2_t = Default::default();
                 NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000,);
 
-                pts = (video_frame.timecode as u64) - timestamp_data.pts;
+                let time = &receivers.get(&_settings.id_receiver).unwrap().timestamp;
+                pts = video_frame.timecode as u64 - time;
 
                 let buff_size = (video_frame.yres * video_frame.line_stride_in_bytes) as usize;
                 //println!("{:?}", buff_size);

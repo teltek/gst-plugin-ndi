@@ -52,6 +52,7 @@ struct ndi_receiver_info{
     audio: bool,
     ndi_instance: NdiInstance,
     id: i8,
+    timestamp: u64,
 }
 
 lazy_static! {
@@ -193,7 +194,7 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
 
         NDIlib_recv_send_metadata(pNDI_recv, &enable_hw_accel);
 
-        receivers.insert(id_receiver, ndi_receiver_info{stream_name: source_name.clone(), ip: source_ip.clone(), video:video, audio: audio, ndi_instance: NdiInstance{recv: pNDI_recv}, id: id_receiver});
+        receivers.insert(id_receiver, ndi_receiver_info{stream_name: source_name.clone(), ip: source_ip.clone(), video:video, audio: audio, ndi_instance: NdiInstance{recv: pNDI_recv}, id: id_receiver, timestamp: 0});
 
         // let start = SystemTime::now();
         // let since_the_epoch = start.duration_since(UNIX_EPOCH)
