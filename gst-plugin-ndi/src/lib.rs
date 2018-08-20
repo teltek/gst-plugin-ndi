@@ -26,7 +26,6 @@ mod ndivideosrc;
 mod ndiaudiosrc;
 pub mod ndilib;
 
-use std::ptr;
 use std::{thread, time};
 //use std::time::{SystemTime, UNIX_EPOCH};
 use std::ffi::{CStr, CString};
@@ -46,16 +45,6 @@ fn plugin_init(plugin: &gst::Plugin) -> bool {
     true
 }
 
-struct Ndi{
-    recv: Option<NdiInstance>,
-    start_pts: u64,
-}
-
-static mut ndi_struct: Ndi = Ndi{
-    recv: None,
-    start_pts: 0,
-};
-
 struct ndi_receiver_info{
     stream_name: String,
     ip: String,
@@ -67,7 +56,7 @@ struct ndi_receiver_info{
 
 lazy_static! {
     static ref hashmap_receivers: Mutex<HashMap<i8, ndi_receiver_info>> = {
-        let mut m = HashMap::new();
+        let m = HashMap::new();
         Mutex::new(m)
     };
 }
@@ -84,7 +73,7 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
         id_receiver += 1;
 
         //FIXME Search for another way to know if the source is an audio or a video source
-        if (element.get_name().contains("audiosrc")){
+        if element.get_name().contains("audiosrc"){
             audio = true;
         }
         else
@@ -93,12 +82,12 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
         }
 
         for val in receivers.values_mut(){
-            if (val.ip == ip || val.stream_name == stream_name){
-                if ((val.audio && val.video) || (val.audio && audio) || (val.video && video)){
+            if val.ip == ip || val.stream_name == stream_name{
+                if (val.audio && val.video) || (val.audio && audio) || (val.video && video){
                     break;
                 }
                 else {
-                    if (video){
+                    if video {
                         val.video = video;
                     }
                     else{
@@ -116,56 +105,53 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
             return 0;
         }
 
-        let mut source: NDIlib_source_t = NDIlib_source_t{p_ndi_name: ptr::null(),
-            p_ip_address: ptr::null()};
+        //TODO default values
+        let NDI_find_create_desc: NDIlib_find_create_t = Default::default();
+        let pNDI_find = NDIlib_find_create_v2(&NDI_find_create_desc);
+        //let ip_ptr = CString::new(ip.clone()).unwrap();
+        if pNDI_find.is_null() {
+            gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_find_create_v2 error"]);
+            // return false;
+            return 0;
+        }
 
-            //TODO default values
-            let NDI_find_create_desc: NDIlib_find_create_t = Default::default();
-            let pNDI_find = NDIlib_find_create_v2(&NDI_find_create_desc);
-            let ip_ptr = CString::new(ip.clone()).unwrap();
-                if pNDI_find.is_null() {
-                    gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_find_create_v2 error"]);
-                    // return false;
-                    return 0;
-                }
+        let mut total_sources: u32 = 0;
+        let p_sources;
 
-                let mut total_sources: u32 = 0;
-                let p_sources;
+        // TODO Sleep 1s to wait for all sources
+        thread::sleep(time::Duration::from_millis(2000));
+        p_sources = NDIlib_find_get_current_sources(pNDI_find, &mut total_sources as *mut u32);
 
-                // TODO Sleep 1s to wait for all sources
-                thread::sleep(time::Duration::from_millis(2000));
-                p_sources = NDIlib_find_get_current_sources(pNDI_find, &mut total_sources as *mut u32);
+        // We need at least one source
+        if p_sources.is_null() {
+            gst_element_error!(element, gst::CoreError::Negotiation, ["Error getting NDIlib_find_get_current_sources"]);
+            // return false;
+            return 0;
+        }
 
-                // We need at least one source
-                if p_sources.is_null() {
-                    gst_element_error!(element, gst::CoreError::Negotiation, ["Error getting NDIlib_find_get_current_sources"]);
-                    // return false;
-                    return 0;
-                }
+        let mut no_source: isize = -1;
+        for i in 0..total_sources as isize{
+            if CStr::from_ptr((*p_sources.offset(i)).p_ndi_name).to_string_lossy().into_owned() == stream_name ||
+            CStr::from_ptr((*p_sources.offset(i)).p_ip_address).to_string_lossy().into_owned() == ip{
+                no_source = i;
+                break;
+            }
+        }
+        if no_source  == -1 {
+            gst_element_error!(element, gst::CoreError::Negotiation, ["Stream name not found"]);
+            // return false;
+            return 0;
+        }
 
-                let mut no_source: isize = -1;
-                for i in 0..total_sources as isize{
-                    if (CStr::from_ptr((*p_sources.offset(i)).p_ndi_name).to_string_lossy().into_owned() == stream_name ||
-                    CStr::from_ptr((*p_sources.offset(i)).p_ip_address).to_string_lossy().into_owned() == ip){
-                        no_source = i;
-                        break;
-                    }
-                }
-                if no_source  == -1 {
-                    gst_element_error!(element, gst::CoreError::Negotiation, ["Stream name not found"]);
-                    // return false;
-                    return 0;
-                }
+        gst_debug!(cat, obj: element, "Total sources in network {}: Connecting to NDI source with name '{}' and address '{}'", total_sources,
+        CStr::from_ptr((*p_sources.offset(no_source)).p_ndi_name)
+        .to_string_lossy()
+        .into_owned(),
+        CStr::from_ptr((*p_sources.offset(no_source)).p_ip_address)
+        .to_string_lossy()
+        .into_owned());
 
-                gst_debug!(cat, obj: element, "Total sources in network {}: Connecting to NDI source with name '{}' and address '{}'", total_sources,
-                CStr::from_ptr((*p_sources.offset(no_source)).p_ndi_name)
-                .to_string_lossy()
-                .into_owned(),
-                CStr::from_ptr((*p_sources.offset(no_source)).p_ip_address)
-                .to_string_lossy()
-                .into_owned());
-
-                source = *p_sources.offset(no_source).clone();
+        let source = *p_sources.offset(no_source).clone();
 
         let source_ip = CStr::from_ptr(source.p_ip_address).to_string_lossy().into_owned();
         let source_name = CStr::from_ptr(source.p_ndi_name).to_string_lossy().into_owned();
@@ -228,7 +214,7 @@ fn stop_ndi(cat: gst::DebugCategory , element: &BaseSrc, id: i8) -> bool{
         {
             let val = receivers.get_mut(&id).unwrap();
             if val.video && val.audio{
-                if (element.get_name().contains("audiosrc")){
+                if element.get_name().contains("audiosrc"){
                     val.audio = false;
                 }
                 else{

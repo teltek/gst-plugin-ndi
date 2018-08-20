@@ -18,7 +18,6 @@ use std::ptr;
 
 use ndilib::*;
 use connect_ndi;
-// use ndi_struct;
 use stop_ndi;
 
 use hashmap_receivers;
@@ -302,7 +301,7 @@ impl NdiAudioSrc {
                     //let settings = *self.settings.lock().unwrap();
                     let state = self.state.lock().unwrap();
 
-                    if let Some(ref info) = state.info {
+                    if let Some(ref _info) = state.info {
                         // let latency = gst::SECOND
                         // .mul_div_floor(settings.samples_per_buffer as u64, info.rate() as u64)
                         // .unwrap();
@@ -311,10 +310,9 @@ impl NdiAudioSrc {
                         // .mul_div_floor(1 as u64, 30 as u64)
                         // .unwrap();
                         // gst_debug!(self.cat, obj: element, "Returning latency {}", latency);
-                        println!("/*/a*f/a*sd/f*ad/sf*ad/sf*ad/sf");
                         let max = latency * 1843200;
-                        println!("{:?}", latency);
-                        println!("{:?}",max);
+                        // println!("{:?}", latency);
+                        // println!("{:?}",max);
                         q.set(true, latency, max);
                         return true;
                     } else {
@@ -334,7 +332,7 @@ impl NdiAudioSrc {
 
                 let recv = &receivers.get(&settings.id_receiver).unwrap().ndi_instance;
                 let pNDI_recv = recv.recv;
-                
+
                 let mut timestamp_data = self.timestamp_data.lock().unwrap();
 
                 let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
@@ -344,7 +342,6 @@ impl NdiAudioSrc {
                     frame_type = NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000);
                 }
 
-                //ndi_struct.start_pts = audio_frame.timecode as u64;
                 timestamp_data.pts = audio_frame.timecode as u64;
 
                 let mut caps = gst::Caps::truncate(caps);
@@ -387,14 +384,7 @@ impl NdiAudioSrc {
             unsafe{
                 let receivers = hashmap_receivers.lock().unwrap();
 
-                let mut id = &_settings.stream_name;
-
-                if (&_settings.ip != ""){
-                    id = &_settings.ip;
-                }
-
                 let recv = &receivers.get(&_settings.id_receiver).unwrap().ndi_instance;
-
                 let pNDI_recv = recv.recv;
 
                 let pts: u64;
@@ -402,7 +392,6 @@ impl NdiAudioSrc {
                 NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000,);
 
                 pts = (audio_frame.timecode as u64) - timestamp_data.pts;
-                //pts = (audio_frame.timecode as u64) - ndi_struct.start_pts;
 
                 let buff_size = ((audio_frame.channel_stride_in_bytes)) as usize;
                 let mut buffer = gst::Buffer::with_size(buff_size).unwrap();

@@ -19,7 +19,6 @@ use std::ptr;
 
 use ndilib::*;
 use connect_ndi;
-// use ndi_struct;
 use stop_ndi;
 
 use hashmap_receivers;
@@ -309,7 +308,7 @@ impl NdiVideoSrc {
                     //let settings = *self.settings.lock().unwrap();
                     let state = self.state.lock().unwrap();
 
-                    if let Some(ref info) = state.info {
+                    if let Some(ref _info) = state.info {
                         // let latency = gst::SECOND
                         // .mul_div_floor(settings.samples_per_buffer as u64, info.rate() as u64)
                         // .unwrap();
@@ -318,10 +317,9 @@ impl NdiVideoSrc {
                         // .mul_div_floor(1 as u64, 30 as u64)
                         // .unwrap();
                         // gst_debug!(self.cat, obj: element, "Returning latency {}", latency);
-                        println!("/*/a*f/a*sd/f*ad/sf*ad/sf*ad/sf");
                         let max = latency * 1843200;
-                        println!("{:?}", latency);
-                        println!("{:?}",max);
+                        // println!("{:?}", latency);
+                        // println!("{:?}",max);
                         q.set(true, latency, max);
                         return true;
                     } else {
@@ -353,7 +351,6 @@ impl NdiVideoSrc {
 
                 //TODO Check that this is working
                 timestamp_data.pts = video_frame.timecode as u64;
-                //ndi_struct.start_pts = video_frame.timecode as u64;
 
                 let mut caps = gst::Caps::truncate(caps);
                 {
@@ -403,7 +400,6 @@ impl NdiVideoSrc {
                 NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000,);
 
                 pts = (video_frame.timecode as u64) - timestamp_data.pts;
-                //pts = (video_frame.timecode as u64) - ndi_struct.start_pts;
 
                 let buff_size = (video_frame.yres * video_frame.line_stride_in_bytes) as usize;
                 //println!("{:?}", buff_size);
