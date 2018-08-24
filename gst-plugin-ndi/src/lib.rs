@@ -52,8 +52,17 @@ struct ndi_receiver_info{
     audio: bool,
     ndi_instance: NdiInstance,
     id: i8,
-    timestamp: u64,
 }
+
+struct Ndi{
+    initial_timestamp: u64,
+    start_pts: gst::ClockTime,
+}
+
+static mut ndi_struct: Ndi = Ndi{
+    initial_timestamp: 0,
+    start_pts: gst::ClockTime(Some(0)),
+};
 
 lazy_static! {
     static ref hashmap_receivers: Mutex<HashMap<i8, ndi_receiver_info>> = {
@@ -139,7 +148,7 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
             }
         }
         if no_source  == -1 {
-            gst_element_error!(element, gst::CoreError::Negotiation, ["Stream name not found"]);
+            gst_element_error!(element, gst::ResourceError::OpenRead, ["Stream not found"]);
             // return false;
             return 0;
         }
@@ -194,7 +203,7 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
 
         NDIlib_recv_send_metadata(pNDI_recv, &enable_hw_accel);
 
-        receivers.insert(id_receiver, ndi_receiver_info{stream_name: source_name.clone(), ip: source_ip.clone(), video:video, audio: audio, ndi_instance: NdiInstance{recv: pNDI_recv}, id: id_receiver, timestamp: 0});
+        receivers.insert(id_receiver, ndi_receiver_info{stream_name: source_name.clone(), ip: source_ip.clone(), video:video, audio: audio, ndi_instance: NdiInstance{recv: pNDI_recv}, id: id_receiver});
 
         // let start = SystemTime::now();
         // let since_the_epoch = start.duration_since(UNIX_EPOCH)
@@ -211,7 +220,6 @@ fn stop_ndi(cat: gst::DebugCategory , element: &BaseSrc, id: i8) -> bool{
     gst_debug!(cat, obj: element, "Closing NDI connection...");
     unsafe{
         let mut receivers = hashmap_receivers.lock().unwrap();
-
         {
             let val = receivers.get_mut(&id).unwrap();
             if val.video && val.audio{

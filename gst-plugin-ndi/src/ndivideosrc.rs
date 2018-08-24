@@ -20,6 +20,7 @@ use std::ptr;
 use ndilib::*;
 use connect_ndi;
 use stop_ndi;
+use ndi_struct;
 
 use hashmap_receivers;
 
@@ -29,6 +30,7 @@ struct Settings {
     stream_name: String,
     ip: String,
     id_receiver: i8,
+    latency: u64,
 }
 
 impl Default for Settings {
@@ -37,6 +39,7 @@ impl Default for Settings {
             stream_name: String::from("Fixed ndi stream name"),
             ip: String::from(""),
             id_receiver: 0,
+            latency: 0,
         }
     }
 }
@@ -190,8 +193,8 @@ impl NdiVideoSrc {
                     settings.stream_name = stream_name;
                     drop(settings);
 
-                    let _ =
-                    element.post_message(&gst::Message::new_latency().src(Some(&element)).build());
+                    // let _ =
+                    // element.post_message(&gst::Message::new_latency().src(Some(&element)).build());
                 },
                 Property::String("ip", ..) => {
                     let mut settings = self.settings.lock().unwrap();
@@ -206,8 +209,8 @@ impl NdiVideoSrc {
                     settings.ip = ip;
                     drop(settings);
 
-                    let _ =
-                    element.post_message(&gst::Message::new_latency().src(Some(&element)).build());
+                    // let _ =
+                    // element.post_message(&gst::Message::new_latency().src(Some(&element)).build());
                 }
                 _ => unimplemented!(),
             }
@@ -245,18 +248,16 @@ impl NdiVideoSrc {
         // We simply remember the resulting AudioInfo from the caps to be able to use this for knowing
         // the sample rate, etc. when creating buffers
         fn set_caps(&self, element: &BaseSrc, caps: &gst::CapsRef) -> bool {
-
             let info = match gst_video::VideoInfo::from_caps(caps) {
                 None => return false,
                 Some(info) => info,
             };
-
             gst_debug!(self.cat, obj: element, "Configuring for caps {}", caps);
 
             // TODO Puede que falle si no creamos la estructura de cero, pero si lo hacemos no podemos poner recv a none
             let mut state = self.state.lock().unwrap();
             state.info = Some(info);
-
+            let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
             true
         }
 
@@ -264,13 +265,15 @@ impl NdiVideoSrc {
         fn start(&self, element: &BaseSrc) -> bool {
             // Reset state
             *self.state.lock().unwrap() = Default::default();
-
             let mut settings = self.settings.lock().unwrap();
             settings.id_receiver = connect_ndi(self.cat, element, settings.ip.clone(), settings.stream_name.clone());
+
             if settings.id_receiver == 0{
+                gst_error!(self.cat, obj: element, "Stream not found");
                 return false;
             }
             else{
+                // let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
                 return true;
             }
         }
@@ -288,46 +291,54 @@ impl NdiVideoSrc {
         }
 
 
-        fn query(&self, element: &BaseSrc, query: &mut gst::QueryRef) -> bool {
-            use gst::QueryView;
-
-            match query.view_mut() {
-                // We only work in Push mode. In Pull mode, create() could be called with
-                // arbitrary offsets and we would have to produce for that specific offset
-                QueryView::Scheduling(ref mut q) => {
-                    q.set(gst::SchedulingFlags::SEQUENTIAL, 1, -1, 0);
-                    q.add_scheduling_modes(&[gst::PadMode::Push]);
-                    return true;
-                }
-                // In Live mode we will have a latency equal to the number of samples in each buffer.
-                // We can't output samples before they were produced, and the last sample of a buffer
-                // is produced that much after the beginning, leading to this latency calculation
-                QueryView::Latency(ref mut q) => {
-                    //let settings = *self.settings.lock().unwrap();
-                    let state = self.state.lock().unwrap();
-
-                    if let Some(ref _info) = state.info {
-                        // let latency = gst::SECOND
-                        // .mul_div_floor(settings.samples_per_buffer as u64, info.rate() as u64)
-                        // .unwrap();
-                        let latency = gst::SECOND.mul_div_floor(3 as u64, 2 as u64).unwrap();
-                        // let latency = gst::SECOND
-                        // .mul_div_floor(1 as u64, 30 as u64)
-                        // .unwrap();
-                        // gst_debug!(self.cat, obj: element, "Returning latency {}", latency);
-                        let max = latency * 1843200;
-                        // println!("{:?}", latency);
-                        // println!("{:?}",max);
-                        q.set(true, latency, max);
-                        return true;
-                    } else {
-                        return false;
-                    }
-                }
-                _ => (),
-            }
-            BaseSrcBase::parent_query(element, query)
-        }
+        // fn query(&self, element: &BaseSrc, query: &mut gst::QueryRef) -> bool {
+        //     use gst::QueryView;
+        //     println!("****************************************Dentro de query");
+        //     match query.view_mut() {
+        //         // We only work in Push mode. In Pull mode, create() could be called with
+        //         // arbitrary offsets and we would have to produce for that specific offset
+        //         QueryView::Scheduling(ref mut q) => {
+        //             q.set(gst::SchedulingFlags::SEQUENTIAL, 1, -1, 0);
+        //             q.add_scheduling_modes(&[gst::PadMode::Push]);
+        //             return true;
+        //         }
+        //         // In Live mode we will have a latency equal to the number of samples in each buffer.
+        //         // We can't output samples before they were produced, and the last sample of a buffer
+        //         // is produced that much after the beginning, leading to this latency calculation
+        //         QueryView::Latency(ref mut q) => {
+        //             let settings = self.settings.lock().unwrap();
+        //             let state = self.state.lock().unwrap();
+        //             println!("Dentro de query");
+        //
+        //             if let Some(ref _info) = state.info {
+        //                 // let latency = gst::SECOND
+        //                 // .mul_div_floor(settings.samples_per_buffer as u64, info.rate() as u64)
+        //                 // .unwrap();
+        //                 let latency = gst::SECOND.mul_div_floor(3 as u64, 2 as u64).unwrap();
+        //                 let mut latency = gst::SECOND.mul_div_floor(settings.latency, 1000).unwrap();
+        //                 // if settings.latency > 2000{
+        //                 //     println!("{:?}", element.get_name());
+        //                 //     latency = gst::SECOND * 0;
+        //                 // }
+        //                 let latency = gst::SECOND * 0;
+        //                 // .mul_div_floor(1 as u64, 30 as u64)
+        //                 // .unwrap();
+        //                 // gst_debug!(self.cat, obj: element, "Returning latency {}", latency);
+        //                 let max = gst::SECOND * 120 * 1843200;
+        //                 // println!("{:?}", latency2);
+        //                 println!("{:?}", latency);
+        //                 println!("{:?}", (settings.latency / 1000));
+        //                 // println!("{:?}",max);
+        //                 q.set(true, latency, max);
+        //                 return true;
+        //             } else {
+        //                 return false;
+        //             }
+        //         }
+        //         _ => (),
+        //     }
+        //     BaseSrcBase::parent_query(element, query)
+        // }
 
         fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
             //We need to set the correct caps resolution and framerate
@@ -346,9 +357,8 @@ impl NdiVideoSrc {
                     frame_type = NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000);
                 }
 
-                //TODO Check that this is working
-                if receiver.timestamp >= video_frame.timecode as u64 || receiver.timestamp == 0{
-                    receiver.timestamp = video_frame.timecode as u64;
+                if ndi_struct.initial_timestamp <= video_frame.timestamp as u64 || ndi_struct.initial_timestamp == 0{
+                    ndi_struct.initial_timestamp = video_frame.timestamp as u64;
                 }
 
                 let mut caps = gst::Caps::truncate(caps);
@@ -362,6 +372,8 @@ impl NdiVideoSrc {
 
                 // Let BaseSrc fixate anything else for us. We could've alternatively have
                 // called Caps::fixate() here
+
+                let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
                 element.parent_fixate(caps)
             }
         }
@@ -396,33 +408,45 @@ impl NdiVideoSrc {
 
                 let pts: u64;
                 let video_frame: NDIlib_video_frame_v2_t = Default::default();
-                NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000,);
 
-                let time = &receivers.get(&_settings.id_receiver).unwrap().timestamp;
-                pts = video_frame.timecode as u64 - time;
+                let time = ndi_struct.initial_timestamp;
+
+                let mut skip_frame = true;
+                while skip_frame {
+                    NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000,);
+                    if time >= (video_frame.timestamp as u64){
+                        gst_debug!(self.cat, obj: element, "Frame timestamp ({:?}) is lower than received in the first frame from NDI ({:?}), so skiping...", (video_frame.timestamp as u64), time);
+                    }
+                    else{
+                        skip_frame = false;
+                    }
+                }
+
+                pts = video_frame.timestamp as u64 - time;
 
                 let buff_size = (video_frame.yres * video_frame.line_stride_in_bytes) as usize;
-                //println!("{:?}", buff_size);
                 let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
                 {
                     let vec = Vec::from_raw_parts(video_frame.p_data as *mut u8, buff_size, buff_size);
                     let pts: gst::ClockTime = (pts * 100).into();
 
-                    // println!("{:?}", video_frame.line_stride_in_bytes);
-                    //println!("{:?}", video_frame);
-                    //TODO get duration
                     let duration: gst::ClockTime = (((video_frame.frame_rate_D as f64 / video_frame.frame_rate_N as f64) * 1000000000.0) as u64).into();
                     let buffer = buffer.get_mut().unwrap();
-                    buffer.set_pts(pts);
+
+                    if ndi_struct.start_pts == gst::ClockTime(Some(0)){
+                        ndi_struct.start_pts = element.get_clock().unwrap().get_time() - element.get_base_time();
+                    }
+
+                    buffer.set_pts(pts + ndi_struct.start_pts);
                     buffer.set_duration(duration);
                     buffer.set_offset(timestamp_data.offset);
                     buffer.set_offset_end(timestamp_data.offset + 1);
                     timestamp_data.offset = timestamp_data.offset + 1;
                     buffer.copy_from_slice(0, &vec).unwrap();
-
                 }
 
                 gst_debug!(self.cat, obj: element, "Produced buffer {:?}", buffer);
+
                 Ok(buffer)
             }
         }

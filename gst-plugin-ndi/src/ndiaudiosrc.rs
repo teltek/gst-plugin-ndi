@@ -19,6 +19,7 @@ use std::ptr;
 use ndilib::*;
 use connect_ndi;
 use stop_ndi;
+use ndi_struct;
 
 use hashmap_receivers;
 
@@ -281,46 +282,46 @@ impl NdiAudioSrc {
             true
         }
 
-        fn query(&self, element: &BaseSrc, query: &mut gst::QueryRef) -> bool {
-            use gst::QueryView;
-
-            match query.view_mut() {
-                // We only work in Push mode. In Pull mode, create() could be called with
-                // arbitrary offsets and we would have to produce for that specific offset
-                QueryView::Scheduling(ref mut q) => {
-                    q.set(gst::SchedulingFlags::SEQUENTIAL, 1, -1, 0);
-                    q.add_scheduling_modes(&[gst::PadMode::Push]);
-                    return true;
-                }
-                // In Live mode we will have a latency equal to the number of samples in each buffer.
-                // We can't output samples before they were produced, and the last sample of a buffer
-                // is produced that much after the beginning, leading to this latency calculation
-                QueryView::Latency(ref mut q) => {
-                    //let settings = *self.settings.lock().unwrap();
-                    let state = self.state.lock().unwrap();
-
-                    if let Some(ref _info) = state.info {
-                        // let latency = gst::SECOND
-                        // .mul_div_floor(settings.samples_per_buffer as u64, info.rate() as u64)
-                        // .unwrap();
-                        let latency = gst::SECOND.mul_div_floor(3 as u64, 2 as u64).unwrap();
-                        // let latency = gst::SECOND
-                        // .mul_div_floor(1 as u64, 30 as u64)
-                        // .unwrap();
-                        // gst_debug!(self.cat, obj: element, "Returning latency {}", latency);
-                        let max = latency * 1843200;
-                        // println!("{:?}", latency);
-                        // println!("{:?}",max);
-                        q.set(true, latency, max);
-                        return true;
-                    } else {
-                        return false;
-                    }
-                }
-                _ => (),
-            }
-            BaseSrcBase::parent_query(element, query)
-        }
+        // fn query(&self, element: &BaseSrc, query: &mut gst::QueryRef) -> bool {
+        //     use gst::QueryView;
+        //
+        //     match query.view_mut() {
+        //         // We only work in Push mode. In Pull mode, create() could be called with
+        //         // arbitrary offsets and we would have to produce for that specific offset
+        //         QueryView::Scheduling(ref mut q) => {
+        //             q.set(gst::SchedulingFlags::SEQUENTIAL, 1, -1, 0);
+        //             q.add_scheduling_modes(&[gst::PadMode::Push]);
+        //             return true;
+        //         }
+        //         // In Live mode we will have a latency equal to the number of samples in each buffer.
+        //         // We can't output samples before they were produced, and the last sample of a buffer
+        //         // is produced that much after the beginning, leading to this latency calculation
+        //         QueryView::Latency(ref mut q) => {
+        //             let settings = &*self.settings.lock().unwrap();
+        //             let state = self.state.lock().unwrap();
+        //
+        //             if let Some(ref _info) = state.info {
+        //                 // let latency = gst::SECOND
+        //                 // .mul_div_floor(1024 as u64, _info.rate() as u64)
+        //                 // .unwrap();
+        //                 let latency = gst::SECOND.mul_div_floor(3 as u64, 2 as u64).unwrap();
+        //                 // let latency = gst::SECOND
+        //                 // .mul_div_floor(1 as u64, 30 as u64)
+        //                 // .unwrap();
+        //                 // gst_debug!(self.cat, obj: element, "Returning latency {}", latency);
+        //                 let max = latency * 1843200;
+        //                 // println!("{:?}", latency);
+        //                 // println!("{:?}",max);
+        //                 q.set(true, latency, max);
+        //                 return true;
+        //             } else {
+        //                 return false;
+        //             }
+        //         }
+        //         _ => (),
+        //     }
+        //     BaseSrcBase::parent_query(element, query)
+        // }
 
         fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
             //We need to set the correct caps resolution and framerate
@@ -339,8 +340,8 @@ impl NdiAudioSrc {
                     frame_type = NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000);
                 }
 
-                if receiver.timestamp >= audio_frame.timecode as u64 || receiver.timestamp == 0{
-                    receiver.timestamp = audio_frame.timecode as u64;
+                if ndi_struct.initial_timestamp <= audio_frame.timestamp as u64 || ndi_struct.initial_timestamp == 0{
+                    ndi_struct.initial_timestamp = audio_frame.timestamp as u64;
                 }
 
                 let mut caps = gst::Caps::truncate(caps);
@@ -388,20 +389,36 @@ impl NdiAudioSrc {
 
                 let pts: u64;
                 let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
-                NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000,);
 
-                let time = &receivers.get(&_settings.id_receiver).unwrap().timestamp;
-                pts = audio_frame.timecode as u64- time;
+                let time = ndi_struct.initial_timestamp;
+
+                let mut skip_frame = true;
+                while skip_frame {
+                    NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000,);
+                    if time >= (audio_frame.timestamp as u64){
+                        gst_debug!(self.cat, obj: element, "Frame timestamp ({:?}) is lower than received in the first frame from NDI ({:?}), so skiping...", (audio_frame.timestamp as u64), time);
+                    }
+                    else{
+                        skip_frame = false;
+                    }
+                }
+
+                pts = audio_frame.timestamp as u64 - time;
 
                 let buff_size = ((audio_frame.channel_stride_in_bytes)) as usize;
                 let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
                 {
                     let  vec = Vec::from_raw_parts(audio_frame.p_data as *mut u8, buff_size, buff_size);
-                    //TODO Set pts, duration and other info about the buffer
                     let pts: gst::ClockTime = (pts * 100).into();
-                    let duration: gst::ClockTime = (((audio_frame.no_samples as f64 / audio_frame.sample_rate as f64) * 10000000.0) as u64).into();
+
+                    let duration: gst::ClockTime = (((audio_frame.no_samples as f64 / audio_frame.sample_rate as f64) * 1000000000.0) as u64).into();
                     let buffer = buffer.get_mut().unwrap();
-                    buffer.set_pts(pts);
+
+                    if ndi_struct.start_pts == gst::ClockTime(Some(0)){
+                        ndi_struct.start_pts = element.get_clock().unwrap().get_time() - element.get_base_time();
+                    }
+
+                    buffer.set_pts(pts + ndi_struct.start_pts);
                     buffer.set_duration(duration);
                     buffer.set_offset(timestamp_data.offset);
                     buffer.set_offset_end(timestamp_data.offset + 1);
@@ -410,6 +427,7 @@ impl NdiAudioSrc {
                 }
 
                 gst_debug!(self.cat, obj: element, "Produced buffer {:?}", buffer);
+
                 Ok(buffer)
             }
         }
