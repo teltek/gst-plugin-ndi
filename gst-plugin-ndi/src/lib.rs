@@ -80,7 +80,6 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
         let mut receivers = hashmap_receivers.lock().unwrap();
         let mut audio = false;
         let mut video = false;
-        id_receiver += 1;
 
         //FIXME Search for another way to know if the source is an audio or a video source
         if element.get_name().contains("audiosrc"){
@@ -94,7 +93,7 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
         for val in receivers.values_mut(){
             if val.ip == ip || val.stream_name == stream_name{
                 if (val.audio && val.video) || (val.audio && audio) || (val.video && video){
-                    break;
+                    continue;
                 }
                 else {
                     if video {
@@ -203,6 +202,7 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
 
         NDIlib_recv_send_metadata(pNDI_recv, &enable_hw_accel);
 
+        id_receiver += 1;
         receivers.insert(id_receiver, ndi_receiver_info{stream_name: source_name.clone(), ip: source_ip.clone(), video:video, audio: audio, ndi_instance: NdiInstance{recv: pNDI_recv}, id: id_receiver});
 
         // let start = SystemTime::now();
