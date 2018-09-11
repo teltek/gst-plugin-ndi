@@ -8,8 +8,7 @@ use gst_base::prelude::*;
 
 use gst_plugin::base_src::*;
 use gst_plugin::element::*;
-use gst_plugin::object::*;
-use gst_plugin::properties::*;
+use gobject_subclass::object::*;
 
 use std::sync::Mutex;
 use std::{i32, u32};

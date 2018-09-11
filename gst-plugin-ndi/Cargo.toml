@@ -6,15 +6,14 @@ repository = "https://gitlab.teltek.es/rubenrua/ndi-rs.git"
 license = "unknow" # TODO MIT/Apache-2.0
 
 [dependencies]
-gst-plugin = "0.2"
-glib = "0.5"
-gstreamer = "0.11"
-gstreamer-base = "0.11"
-gstreamer-video = "0.11"
-gstreamer-audio = "0.11"
+gobject-subclass = "0.2"
+gst-plugin = "0.3"
+glib = "0.6"
+gstreamer = "0.12"
+gstreamer-base = "0.12"
+gstreamer-video = "0.12"
+gstreamer-audio = "0.12"
 lazy_static = "1.1.0"
-byte-slice-cast = "0.1" # TODO delete
-num-traits = "0.2" # TODO delete
 
 [lib]
 name = "gstndi"

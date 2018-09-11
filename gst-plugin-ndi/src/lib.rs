@@ -9,6 +9,8 @@
 // except according to those terms.
 
 extern crate glib;
+extern crate gobject_subclass;
+
 #[macro_use]
 extern crate gst_plugin;
 #[macro_use]
@@ -17,8 +19,6 @@ extern crate gstreamer_audio as gst_audio;
 extern crate gstreamer_base as gst_base;
 extern crate gstreamer_video as gst_video;
 
-extern crate byte_slice_cast;
-extern crate num_traits;
 #[macro_use]
 extern crate lazy_static;
 
@@ -27,7 +27,6 @@ mod ndiaudiosrc;
 pub mod ndilib;
 
 use std::{thread, time};
-//use std::time::{SystemTime, UNIX_EPOCH};
 use std::ffi::{CStr, CString};
 use ndilib::*;
 use gst_plugin::base_src::*;
