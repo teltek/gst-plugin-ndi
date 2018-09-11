@@ -228,6 +228,30 @@ impl NdiAudioSrc {
 
     // Virtual methods of gst::Element. We override none
     impl ElementImpl<BaseSrc> for NdiAudioSrc {
+        fn change_state(&self, element: &BaseSrc, transition: gst::StateChange) -> gst::StateChangeReturn {
+            if transition == gst::StateChange::PausedToPlaying{
+                let receivers = hashmap_receivers.lock().unwrap();
+                let settings = self.settings.lock().unwrap();
+
+                let receiver = receivers.get(&settings.id_receiver).unwrap();
+                let recv = &receiver.ndi_instance;
+                let pNDI_recv = recv.recv;
+
+                let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
+
+                let mut frame_type: NDIlib_frame_type_e = NDIlib_frame_type_e::NDIlib_frame_type_none;
+                unsafe{
+                    while frame_type != NDIlib_frame_type_e::NDIlib_frame_type_audio{
+                        frame_type = NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000);
+                    }
+
+                    if ndi_struct.initial_timestamp <= audio_frame.timestamp as u64 || ndi_struct.initial_timestamp == 0{
+                        ndi_struct.initial_timestamp = audio_frame.timestamp as u64;
+                    }
+                }
+            }
+            element.parent_change_state(transition)
+        }
     }
 
     // Virtual methods of gst_base::BaseSrc
@@ -281,54 +305,55 @@ impl NdiAudioSrc {
             true
         }
 
-        // fn query(&self, element: &BaseSrc, query: &mut gst::QueryRef) -> bool {
-        //     use gst::QueryView;
-        //
-        //     match query.view_mut() {
-        //         // We only work in Push mode. In Pull mode, create() could be called with
-        //         // arbitrary offsets and we would have to produce for that specific offset
-        //         QueryView::Scheduling(ref mut q) => {
-        //             q.set(gst::SchedulingFlags::SEQUENTIAL, 1, -1, 0);
-        //             q.add_scheduling_modes(&[gst::PadMode::Push]);
-        //             return true;
-        //         }
-        //         // In Live mode we will have a latency equal to the number of samples in each buffer.
-        //         // We can't output samples before they were produced, and the last sample of a buffer
-        //         // is produced that much after the beginning, leading to this latency calculation
-        //         QueryView::Latency(ref mut q) => {
-        //             let settings = &*self.settings.lock().unwrap();
-        //             let state = self.state.lock().unwrap();
-        //
-        //             if let Some(ref _info) = state.info {
-        //                 // let latency = gst::SECOND
-        //                 // .mul_div_floor(1024 as u64, _info.rate() as u64)
-        //                 // .unwrap();
-        //                 let latency = gst::SECOND.mul_div_floor(3 as u64, 2 as u64).unwrap();
-        //                 // let latency = gst::SECOND
-        //                 // .mul_div_floor(1 as u64, 30 as u64)
-        //                 // .unwrap();
-        //                 // gst_debug!(self.cat, obj: element, "Returning latency {}", latency);
-        //                 let max = latency * 1843200;
-        //                 // println!("{:?}", latency);
-        //                 // println!("{:?}",max);
-        //                 q.set(true, latency, max);
-        //                 return true;
-        //             } else {
-        //                 return false;
-        //             }
-        //         }
-        //         _ => (),
-        //     }
-        //     BaseSrcBase::parent_query(element, query)
-        // }
+        fn query(&self, element: &BaseSrc, query: &mut gst::QueryRef) -> bool {
+            use gst::QueryView;
+
+            match query.view_mut() {
+                // We only work in Push mode. In Pull mode, create() could be called with
+                // arbitrary offsets and we would have to produce for that specific offset
+                QueryView::Scheduling(ref mut q) => {
+                    q.set(gst::SchedulingFlags::SEQUENTIAL, 1, -1, 0);
+                    q.add_scheduling_modes(&[gst::PadMode::Push]);
+                    return true;
+                }
+                // In Live mode we will have a latency equal to the number of samples in each buffer.
+                // We can't output samples before they were produced, and the last sample of a buffer
+                // is produced that much after the beginning, leading to this latency calculation
+                // QueryView::Latency(ref mut q) => {
+                //     let settings = &*self.settings.lock().unwrap();
+                //     let state = self.state.lock().unwrap();
+                //
+                //     if let Some(ref _info) = state.info {
+                //         // let latency = gst::SECOND
+                //         // .mul_div_floor(1024 as u64, _info.rate() as u64)
+                //         // .unwrap();
+                //         let latency = gst::SECOND.mul_div_floor(3 as u64, 2 as u64).unwrap();
+                //         // let latency = gst::SECOND
+                //         // .mul_div_floor(1 as u64, 30 as u64)
+                //         // .unwrap();
+                //         // gst_debug!(self.cat, obj: element, "Returning latency {}", latency);
+                //         let max = latency * 1843200;
+                //         // println!("{:?}", latency);
+                //         // println!("{:?}",max);
+                //         q.set(true, latency, max);
+                //         return true;
+                //     } else {
+                //         return false;
+                //     }
+                // }
+                _ => (),
+            }
+            BaseSrcBase::parent_query(element, query)
+        }
 
         fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
             //We need to set the correct caps resolution and framerate
             unsafe{
-                let mut receivers = hashmap_receivers.lock().unwrap();
+                let receivers = hashmap_receivers.lock().unwrap();
                 let settings = self.settings.lock().unwrap();
 
-                let receiver = receivers.get_mut(&settings.id_receiver).unwrap();
+                let receiver = receivers.get(&settings.id_receiver).unwrap();
+
                 let recv = &receiver.ndi_instance;
                 let pNDI_recv = recv.recv;
 
@@ -337,10 +362,6 @@ impl NdiAudioSrc {
                 let mut frame_type: NDIlib_frame_type_e = NDIlib_frame_type_e::NDIlib_frame_type_none;
                 while frame_type != NDIlib_frame_type_e::NDIlib_frame_type_audio{
                     frame_type = NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000);
-                }
-
-                if ndi_struct.initial_timestamp <= audio_frame.timestamp as u64 || ndi_struct.initial_timestamp == 0{
-                    ndi_struct.initial_timestamp = audio_frame.timestamp as u64;
                 }
 
                 let mut caps = gst::Caps::truncate(caps);
