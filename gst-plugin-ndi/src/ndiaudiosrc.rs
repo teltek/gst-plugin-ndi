@@ -414,7 +414,11 @@ impl NdiAudioSrc {
 
                 let mut skip_frame = true;
                 while skip_frame {
-                    NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000,);
+                    let frame_type = NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000,);
+                    if frame_type == NDIlib_frame_type_e::NDIlib_frame_type_none || frame_type == NDIlib_frame_type_e::NDIlib_frame_type_error {
+                        gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type none received, assuming that the source closed the stream...."]);
+                        return Err(gst::FlowReturn::CustomError);
+                    }
                     if time >= (audio_frame.timestamp as u64){
                         gst_debug!(self.cat, obj: element, "Frame timestamp ({:?}) is lower than received in the first frame from NDI ({:?}), so skiping...", (audio_frame.timestamp as u64), time);
                     }

@@ -293,7 +293,6 @@ impl NdiVideoSrc {
             settings.id_receiver = connect_ndi(self.cat, element, settings.ip.clone(), settings.stream_name.clone());
 
             if settings.id_receiver == 0{
-                gst_error!(self.cat, obj: element, "Stream not found");
                 return false;
             }
             else{
@@ -432,7 +431,11 @@ impl NdiVideoSrc {
 
                 let mut skip_frame = true;
                 while skip_frame {
-                    NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000,);
+                    let frame_type = NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000,);
+                    if frame_type == NDIlib_frame_type_e::NDIlib_frame_type_none || frame_type == NDIlib_frame_type_e::NDIlib_frame_type_error {
+                        gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type none received, assuming that the source closed the stream...."]);
+                        return Err(gst::FlowReturn::CustomError);
+                    }
                     if time >= (video_frame.timestamp as u64){
                         gst_debug!(self.cat, obj: element, "Frame timestamp ({:?}) is lower than received in the first frame from NDI ({:?}), so skiping...", (video_frame.timestamp as u64), time);
                     }
