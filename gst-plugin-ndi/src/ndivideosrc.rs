@@ -364,36 +364,36 @@ impl NdiVideoSrc {
 
         fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
             //We need to set the correct caps resolution and framerate
-            unsafe{
-                let receivers = hashmap_receivers.lock().unwrap();
-                let settings = self.settings.lock().unwrap();
+            let receivers = hashmap_receivers.lock().unwrap();
+            let settings = self.settings.lock().unwrap();
 
-                let receiver = receivers.get(&settings.id_receiver).unwrap();
-                let recv = &receiver.ndi_instance;
-                let pNDI_recv = recv.recv;
+            let receiver = receivers.get(&settings.id_receiver).unwrap();
+            let recv = &receiver.ndi_instance;
+            let pNDI_recv = recv.recv;
 
-                let video_frame: NDIlib_video_frame_v2_t = Default::default();
+            let video_frame: NDIlib_video_frame_v2_t = Default::default();
 
-                let mut frame_type: NDIlib_frame_type_e = NDIlib_frame_type_e::NDIlib_frame_type_none;
-                while frame_type != NDIlib_frame_type_e::NDIlib_frame_type_video{
+            let mut frame_type: NDIlib_frame_type_e = NDIlib_frame_type_e::NDIlib_frame_type_none;
+            while frame_type != NDIlib_frame_type_e::NDIlib_frame_type_video{
+                unsafe{
                     frame_type = NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000);
                 }
-
-                let mut caps = gst::Caps::truncate(caps);
-                {
-                    let caps = caps.make_mut();
-                    let s = caps.get_mut_structure(0).unwrap();
-                    s.fixate_field_nearest_int("width", video_frame.xres);
-                    s.fixate_field_nearest_int("height", video_frame.yres);
-                    s.fixate_field_nearest_fraction("framerate", Fraction::new(video_frame.frame_rate_N, video_frame.frame_rate_D));
-                }
-
-                // Let BaseSrc fixate anything else for us. We could've alternatively have
-                // called Caps::fixate() here
-
-                let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
-                element.parent_fixate(caps)
             }
+
+            let mut caps = gst::Caps::truncate(caps);
+            {
+                let caps = caps.make_mut();
+                let s = caps.get_mut_structure(0).unwrap();
+                s.fixate_field_nearest_int("width", video_frame.xres);
+                s.fixate_field_nearest_int("height", video_frame.yres);
+                s.fixate_field_nearest_fraction("framerate", Fraction::new(video_frame.frame_rate_N, video_frame.frame_rate_D));
+            }
+
+            // Let BaseSrc fixate anything else for us. We could've alternatively have
+            // called Caps::fixate() here
+
+            let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
+            element.parent_fixate(caps)
         }
 
         //Creates the video buffers
@@ -418,15 +418,16 @@ impl NdiVideoSrc {
                 }
                 Some(ref info) => info.clone(),
             };
+            // unsafe{
+            let receivers = hashmap_receivers.lock().unwrap();
+
+            let recv = &receivers.get(&_settings.id_receiver).unwrap().ndi_instance;
+            let pNDI_recv = recv.recv;
+
+            let pts: u64;
+            let video_frame: NDIlib_video_frame_v2_t = Default::default();
+
             unsafe{
-                let receivers = hashmap_receivers.lock().unwrap();
-
-                let recv = &receivers.get(&_settings.id_receiver).unwrap().ndi_instance;
-                let pNDI_recv = recv.recv;
-
-                let pts: u64;
-                let video_frame: NDIlib_video_frame_v2_t = Default::default();
-
                 let time = ndi_struct.initial_timestamp;
 
                 let mut skip_frame = true;

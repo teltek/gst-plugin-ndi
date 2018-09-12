@@ -348,35 +348,35 @@ impl NdiAudioSrc {
 
         fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
             //We need to set the correct caps resolution and framerate
-            unsafe{
-                let receivers = hashmap_receivers.lock().unwrap();
-                let settings = self.settings.lock().unwrap();
+            let receivers = hashmap_receivers.lock().unwrap();
+            let settings = self.settings.lock().unwrap();
 
-                let receiver = receivers.get(&settings.id_receiver).unwrap();
+            let receiver = receivers.get(&settings.id_receiver).unwrap();
 
-                let recv = &receiver.ndi_instance;
-                let pNDI_recv = recv.recv;
+            let recv = &receiver.ndi_instance;
+            let pNDI_recv = recv.recv;
 
-                let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
+            let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
 
-                let mut frame_type: NDIlib_frame_type_e = NDIlib_frame_type_e::NDIlib_frame_type_none;
-                while frame_type != NDIlib_frame_type_e::NDIlib_frame_type_audio{
+            let mut frame_type: NDIlib_frame_type_e = NDIlib_frame_type_e::NDIlib_frame_type_none;
+            while frame_type != NDIlib_frame_type_e::NDIlib_frame_type_audio{
+                unsafe{
                     frame_type = NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000);
                 }
-
-                let mut caps = gst::Caps::truncate(caps);
-                {
-                    let caps = caps.make_mut();
-                    let s = caps.get_mut_structure(0).unwrap();
-                    //s.fixate_field_nearest_int("rate", audio_frame.sample_rate);
-                    s.fixate_field_nearest_int("rate", audio_frame.sample_rate / audio_frame.no_channels);
-                    s.fixate_field_nearest_int("channels", audio_frame.no_channels);
-                }
-
-                // Let BaseSrc fixate anything else for us. We could've alternatively have
-                // called Caps::fixate() here
-                element.parent_fixate(caps)
             }
+            let mut caps = gst::Caps::truncate(caps);
+            {
+                let caps = caps.make_mut();
+                let s = caps.get_mut_structure(0).unwrap();
+                //s.fixate_field_nearest_int("rate", audio_frame.sample_rate);
+                s.fixate_field_nearest_int("rate", audio_frame.sample_rate / audio_frame.no_channels);
+                s.fixate_field_nearest_int("channels", audio_frame.no_channels);
+            }
+
+            // Let BaseSrc fixate anything else for us. We could've alternatively have
+            // called Caps::fixate() here
+            element.parent_fixate(caps)
+            // }
         }
 
         //Creates the audio buffers
@@ -401,15 +401,15 @@ impl NdiAudioSrc {
                 }
                 Some(ref info) => info.clone(),
             };
+            let receivers = hashmap_receivers.lock().unwrap();
+
+            let recv = &receivers.get(&_settings.id_receiver).unwrap().ndi_instance;
+            let pNDI_recv = recv.recv;
+
+            let pts: u64;
+            let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
+
             unsafe{
-                let receivers = hashmap_receivers.lock().unwrap();
-
-                let recv = &receivers.get(&_settings.id_receiver).unwrap().ndi_instance;
-                let pNDI_recv = recv.recv;
-
-                let pts: u64;
-                let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
-
                 let time = ndi_struct.initial_timestamp;
 
                 let mut skip_frame = true;

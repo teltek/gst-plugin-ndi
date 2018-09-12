@@ -73,39 +73,39 @@ lazy_static! {
 static mut id_receiver: i8 = 0;
 
 fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream_name: String) -> i8{
-    unsafe {
-        gst_debug!(cat, obj: element, "Starting NDI connection...");
+    gst_debug!(cat, obj: element, "Starting NDI connection...");
 
-        let mut receivers = hashmap_receivers.lock().unwrap();
-        let mut audio = false;
-        let mut video = false;
+    let mut receivers = hashmap_receivers.lock().unwrap();
+    let mut audio = false;
+    let mut video = false;
 
-        //FIXME Search for another way to know if the source is an audio or a video source
-        if element.get_name().contains("audiosrc"){
-            audio = true;
-        }
-        else
-        {
-            video = true;
-        }
+    //FIXME Search for another way to know if the source is an audio or a video source
+    if element.get_name().contains("audiosrc"){
+        audio = true;
+    }
+    else
+    {
+        video = true;
+    }
 
-        for val in receivers.values_mut(){
-            if val.ip == ip || val.stream_name == stream_name{
-                if (val.audio && val.video) || (val.audio && audio) || (val.video && video){
-                    continue;
-                }
-                else {
-                    if video {
-                        val.video = video;
-                    }
-                    else{
-                        val.audio = audio;
-                    }
-                    return val.id;
-                }
+    for val in receivers.values_mut(){
+        if val.ip == ip || val.stream_name == stream_name{
+            if (val.audio && val.video) || (val.audio && audio) || (val.video && video){
+                continue;
             }
-
+            else {
+                if video {
+                    val.video = video;
+                }
+                else{
+                    val.audio = audio;
+                }
+                return val.id;
+            }
         }
+
+    }
+    unsafe {
 
         if !NDIlib_initialize() {
             gst_element_error!(element, gst::CoreError::Negotiation, ["Cannot run NDI: NDIlib_initialize error"]);
@@ -217,30 +217,30 @@ fn connect_ndi(cat: gst::DebugCategory , element: &BaseSrc,  ip: String,  stream
 
 fn stop_ndi(cat: gst::DebugCategory , element: &BaseSrc, id: i8) -> bool{
     gst_debug!(cat, obj: element, "Closing NDI connection...");
-    unsafe{
-        let mut receivers = hashmap_receivers.lock().unwrap();
-        {
-            let val = receivers.get_mut(&id).unwrap();
-            if val.video && val.audio{
-                if element.get_name().contains("audiosrc"){
-                    val.audio = false;
-                }
-                else{
-                    val.video = false;
-                }
-                return true;
+    let mut receivers = hashmap_receivers.lock().unwrap();
+    {
+        let val = receivers.get_mut(&id).unwrap();
+        if val.video && val.audio{
+            if element.get_name().contains("audiosrc"){
+                val.audio = false;
             }
+            else{
+                val.video = false;
+            }
+            return true;
+        }
 
-            let recv = &val.ndi_instance;
-            let pNDI_recv = recv.recv;
+        let recv = &val.ndi_instance;
+        let pNDI_recv = recv.recv;
+        unsafe{
             NDIlib_recv_destroy(pNDI_recv);
             // ndi_struct.recv = None;
             NDIlib_destroy();
         }
-        receivers.remove(&id);
-        gst_debug!(cat, obj: element, "Closed NDI connection");
-        return true;
     }
+    receivers.remove(&id);
+    gst_debug!(cat, obj: element, "Closed NDI connection");
+    return true;
 }
 
 // Static plugin metdata that is directly stored in the plugin shared object and read by GStreamer
