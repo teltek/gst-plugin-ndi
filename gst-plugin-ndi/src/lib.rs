@@ -24,11 +24,11 @@ extern crate lazy_static;
 
 mod ndivideosrc;
 mod ndiaudiosrc;
-pub mod ndilib;
+pub mod ndisys;
 
 use std::{thread, time};
 use std::ffi::{CStr, CString};
-use ndilib::*;
+use ndisys::*;
 use gst_plugin::base_src::*;
 
 use std::collections::HashMap;

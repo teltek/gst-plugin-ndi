@@ -15,7 +15,7 @@ use std::{i32, u32};
 
 use std::ptr;
 
-use ndilib::*;
+use ndisys::*;
 use connect_ndi;
 use stop_ndi;
 use ndi_struct;
