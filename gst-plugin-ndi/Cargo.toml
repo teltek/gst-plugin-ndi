@@ -1,8 +1,8 @@
 [package]
 name = "gst-plugin-ndi"
-version = "0.1.0"
+version = "1.0.0"
 authors = ["Ruben Gonzalez <rubenrua@teltek.es>", "Daniel Vilar <daniel.peiteado@teltek.es>"]
-repository = "https://gitlab.teltek.es/rubenrua/ndi-rs.git"
+repository = "https://github.com/teltek/gst-plugin-ndi"
 license = "LGPL"
 
 [dependencies]

@@ -23,7 +23,6 @@ use stop_ndi;
 
 use hashmap_receivers;
 
-// Property value storage
 #[derive(Debug, Clone)]
 struct Settings {
     stream_name: String,
@@ -43,7 +42,6 @@ impl Default for Settings {
     }
 }
 
-// Metadata for the properties
 static PROPERTIES: [Property; 2] = [
     Property::String(
         "stream-name",
@@ -61,8 +59,6 @@ static PROPERTIES: [Property; 2] = [
     ),
 ];
 
-// Stream-specific state, i.e. audio format configuration
-// and sample offset
 struct State {
     info: Option<gst_video::VideoInfo>,
 }
@@ -77,7 +73,6 @@ struct TimestampData {
     offset: u64,
 }
 
-// Struct containing all the element data
 struct NdiVideoSrc {
     cat: gst::DebugCategory,
     settings: Mutex<Settings>,
@@ -86,10 +81,7 @@ struct NdiVideoSrc {
 }
 
 impl NdiVideoSrc {
-    // Called when a new instance is to be created
     fn new(element: &BaseSrc) -> Box<BaseSrcImpl<BaseSrc>> {
-        // Initialize live-ness and notify the base class that
-        // we'd like to operate in Time format
         element.set_live(true);
         element.set_format(gst::Format::Time);
 
@@ -105,16 +97,6 @@ impl NdiVideoSrc {
         })
     }
 
-    // Called exactly once when registering the type. Used for
-    // setting up metadata for all instances, e.g. the name and
-    // classification and the pad templates with their caps.
-    //
-    // Actual instances can create pads based on those pad templates
-    // with a subset of the caps given here. In case of basesrc,
-    // a "src" and "sink" pad template are required here and the base class
-    // will automatically instantiate pads for them.
-    //
-    // Our element here can output f32 and f64
     fn class_init(klass: &mut BaseSrcClass) {
         klass.set_metadata(
             "NewTek NDI Video Source",
@@ -131,7 +113,7 @@ impl NdiVideoSrc {
                 (
                     "format",
                     &gst::List::new(&[
-                        //TODO add all formats?
+                        //TODO add all formats
                         &gst_video::VideoFormat::Uyvy.to_string(),
                         //&gst_video::VideoFormat::Rgb.to_string(),
                         //&gst_video::VideoFormat::Gray8.to_string(),
@@ -148,26 +130,20 @@ impl NdiVideoSrc {
                 ),
             ],
         );
-        // The src pad template must be named "src" for basesrc
-        // and specific a pad that is always there
+
         let src_pad_template = gst::PadTemplate::new(
             "src",
             gst::PadDirection::Src,
             gst::PadPresence::Always,
             &caps,
-            //&gst::Caps::new_any(),
         );
         klass.add_pad_template(src_pad_template);
 
-        // Install all our properties
         klass.install_properties(&PROPERTIES);
     }
 }
 
-// Virtual methods of GObject itself
 impl ObjectImpl<BaseSrc> for NdiVideoSrc {
-    // Called whenever a value of a property is changed. It can be called
-    // at any time from any thread.
     fn set_property(&self, obj: &glib::Object, id: u32, value: &glib::Value) {
         let prop = &PROPERTIES[id as usize];
         let element = obj.clone().downcast::<BaseSrc>().unwrap();
@@ -185,9 +161,6 @@ impl ObjectImpl<BaseSrc> for NdiVideoSrc {
                 );
                 settings.stream_name = stream_name;
                 drop(settings);
-
-                // let _ =
-                // element.post_message(&gst::Message::new_latency().src(Some(&element)).build());
             }
             Property::String("ip", ..) => {
                 let mut settings = self.settings.lock().unwrap();
@@ -201,16 +174,11 @@ impl ObjectImpl<BaseSrc> for NdiVideoSrc {
                 );
                 settings.ip = ip;
                 drop(settings);
-
-                // let _ =
-                // element.post_message(&gst::Message::new_latency().src(Some(&element)).build());
             }
             _ => unimplemented!(),
         }
     }
 
-    // Called whenever a value of a property is read. It can be called
-    // at any time from any thread.
     fn get_property(&self, _obj: &glib::Object, id: u32) -> Result<glib::Value, ()> {
         let prop = &PROPERTIES[id as usize];
 
@@ -228,7 +196,6 @@ impl ObjectImpl<BaseSrc> for NdiVideoSrc {
     }
 }
 
-// Virtual methods of gst::Element. We override none
 impl ElementImpl<BaseSrc> for NdiVideoSrc {
     fn change_state(
         &self,
@@ -268,14 +235,7 @@ impl ElementImpl<BaseSrc> for NdiVideoSrc {
     }
 }
 
-// Virtual methods of gst_base::BaseSrc
 impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
-    // Called whenever the input/output caps are changing, i.e. in the very beginning before data
-    // flow happens and whenever the situation in the pipeline is changing. All buffers after this
-    // call have the caps given here.
-    //
-    // We simply remember the resulting AudioInfo from the caps to be able to use this for knowing
-    // the sample rate, etc. when creating buffers
     fn set_caps(&self, element: &BaseSrc, caps: &gst::CapsRef) -> bool {
         let info = match gst_video::VideoInfo::from_caps(caps) {
             None => return false,
@@ -283,16 +243,13 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
         };
         gst_debug!(self.cat, obj: element, "Configuring for caps {}", caps);
 
-        // TODO Puede que falle si no creamos la estructura de cero, pero si lo hacemos no podemos poner recv a none
         let mut state = self.state.lock().unwrap();
         state.info = Some(info);
         let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
         true
     }
 
-    // Called when starting, so we can initialize all stream-related state to its defaults
     fn start(&self, element: &BaseSrc) -> bool {
-        // Reset state
         *self.state.lock().unwrap() = Default::default();
         let mut settings = self.settings.lock().unwrap();
         settings.id_receiver = connect_ndi(
@@ -305,9 +262,7 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
         settings.id_receiver != 0
     }
 
-    // Called when shutting down the element so we can release all stream-related state
     fn stop(&self, element: &BaseSrc) -> bool {
-        // Reset state
         *self.state.lock().unwrap() = Default::default();
 
         let settings = self.settings.lock().unwrap();
@@ -328,7 +283,6 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
     }
 
     fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
-        //We need to set the correct caps resolution and framerate
         let receivers = hashmap_receivers.lock().unwrap();
         let settings = self.settings.lock().unwrap();
 
@@ -358,9 +312,6 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
             );
         }
 
-        // Let BaseSrc fixate anything else for us. We could've alternatively have
-        // called Caps::fixate() here
-
         let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
         element.parent_fixate(caps)
     }
@@ -372,13 +323,9 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
         _offset: u64,
         _length: u32,
     ) -> Result<gst::Buffer, gst::FlowReturn> {
-        // Keep a local copy of the values of all our properties at this very moment. This
-        // ensures that the mutex is never locked for long and the application wouldn't
-        // have to block until this function returns when getting/setting property values
         let _settings = &*self.settings.lock().unwrap();
 
         let mut timestamp_data = self.timestamp_data.lock().unwrap();
-        // Get a locked reference to our state, i.e. the input and output AudioInfo
         let state = self.state.lock().unwrap();
         let _info = match state.info {
             None => {
@@ -387,7 +334,6 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
             }
             Some(ref info) => info.clone(),
         };
-        // unsafe{
         let receivers = hashmap_receivers.lock().unwrap();
 
         let recv = &receivers.get(&_settings.id_receiver).unwrap().ndi_instance;
@@ -450,16 +396,8 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
     }
 }
 
-// This zero-sized struct is containing the static metadata of our element. It is only necessary to
-// be able to implement traits on it, but e.g. a plugin that registers multiple elements with the
-// same code would use this struct to store information about the concrete element. An example of
-// this would be a plugin that wraps around a library that has multiple decoders with the same API,
-// but wants (as it should) a separate element registered for each decoder.
 struct NdiVideoSrcStatic;
 
-// The basic trait for registering the type: This returns a name for the type and registers the
-// instance and class initializations functions with the type system, thus hooking everything
-// together.
 impl ImplTypeStatic<BaseSrc> for NdiVideoSrcStatic {
     fn get_name(&self) -> &str {
         "NdiVideoSrc"
@@ -474,9 +412,6 @@ impl ImplTypeStatic<BaseSrc> for NdiVideoSrcStatic {
     }
 }
 
-// Registers the type for our element, and then registers in GStreamer under
-// the name NdiVideoSrc for being able to instantiate it via e.g.
-// gst::ElementFactory::make().
 pub fn register(plugin: &gst::Plugin) {
     let type_ = register_type(NdiVideoSrcStatic);
     gst::Element::register(plugin, "ndivideosrc", 0, type_);
