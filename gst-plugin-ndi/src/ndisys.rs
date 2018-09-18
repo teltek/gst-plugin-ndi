@@ -157,7 +157,6 @@ pub struct NdiInstance {
 
 unsafe impl ::std::marker::Send for NdiInstance {}
 
-
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct NDIlib_tally_t {
