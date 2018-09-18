@@ -104,12 +104,12 @@ pub enum NDIlib_recv_color_format_e {
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum NDIlib_FourCC_type_e {
-    NDIlib_FourCC_type_UYVY = 1498831189,
-    NDIlib_FourCC_type_BGRA = 1095911234,
-    NDIlib_FourCC_type_BGRX = 1481787202,
-    NDIlib_FourCC_type_RGBA = 1094862674,
-    NDIlib_FourCC_type_RGBX = 1480738642,
-    NDIlib_FourCC_type_UYVA = 1096178005,
+    NDIlib_FourCC_type_UYVY = 1_498_831_189,
+    NDIlib_FourCC_type_BGRA = 1_095_911_234,
+    NDIlib_FourCC_type_BGRX = 1_481_787_202,
+    NDIlib_FourCC_type_RGBA = 1_094_862_674,
+    NDIlib_FourCC_type_RGBX = 1_480_738_642,
+    NDIlib_FourCC_type_UYVA = 1_096_178_005,
 }
 
 #[repr(u32)]

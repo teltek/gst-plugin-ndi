@@ -72,7 +72,7 @@ lazy_static! {
 
 static mut id_receiver: i8 = 0;
 
-fn connect_ndi(cat: gst::DebugCategory, element: &BaseSrc, ip: String, stream_name: String) -> i8 {
+fn connect_ndi(cat: gst::DebugCategory, element: &BaseSrc, ip: &str, stream_name: &str) -> i8 {
     gst_debug!(cat, obj: element, "Starting NDI connection...");
 
     let mut receivers = hashmap_receivers.lock().unwrap();
@@ -177,7 +177,7 @@ fn connect_ndi(cat: gst::DebugCategory, element: &BaseSrc, ip: String, stream_na
                 .into_owned()
         );
 
-        let source = *p_sources.offset(no_source).clone();
+        let source = *p_sources.offset(no_source);
 
         let source_ip = CStr::from_ptr(source.p_ip_address)
             .to_string_lossy()
@@ -233,8 +233,8 @@ fn connect_ndi(cat: gst::DebugCategory, element: &BaseSrc, ip: String, stream_na
             ndi_receiver_info {
                 stream_name: source_name.clone(),
                 ip: source_ip.clone(),
-                video: video,
-                audio: audio,
+                video,
+                audio,
                 ndi_instance: NdiInstance { recv: pNDI_recv },
                 id: id_receiver,
             },
@@ -247,7 +247,7 @@ fn connect_ndi(cat: gst::DebugCategory, element: &BaseSrc, ip: String, stream_na
         // ndi_struct.start_pts = Some(since_the_epoch.as_secs() * 1000000000 +
         // since_the_epoch.subsec_nanos() as u64);
         gst_debug!(cat, obj: element, "Started NDI connection");
-        return id_receiver;
+        id_receiver
     }
 }
 
@@ -275,7 +275,7 @@ fn stop_ndi(cat: gst::DebugCategory, element: &BaseSrc, id: i8) -> bool {
     }
     receivers.remove(&id);
     gst_debug!(cat, obj: element, "Closed NDI connection");
-    return true;
+    true
 }
 
 // Static plugin metdata that is directly stored in the plugin shared object and read by GStreamer

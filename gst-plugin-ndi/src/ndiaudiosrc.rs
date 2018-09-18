@@ -293,14 +293,11 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
         settings.id_receiver = connect_ndi(
             self.cat,
             element,
-            settings.ip.clone(),
-            settings.stream_name.clone(),
+            &settings.ip.clone(),
+            &settings.stream_name.clone(),
         );
-        if settings.id_receiver == 0 {
-            return false;
-        } else {
-            return true;
-        }
+
+        settings.id_receiver != 0
     }
 
     // Called when shutting down the element so we can release all stream-related state
@@ -309,7 +306,7 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
         *self.state.lock().unwrap() = Default::default();
 
         let settings = self.settings.lock().unwrap();
-        stop_ndi(self.cat, element, settings.id_receiver.clone());
+        stop_ndi(self.cat, element, settings.id_receiver);
         // Commented because when adding ndi destroy stopped in this line
         //*self.state.lock().unwrap() = Default::default();
         true
@@ -317,41 +314,10 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
 
     fn query(&self, element: &BaseSrc, query: &mut gst::QueryRef) -> bool {
         use gst::QueryView;
-
-        match query.view_mut() {
-            // We only work in Push mode. In Pull mode, create() could be called with
-            // arbitrary offsets and we would have to produce for that specific offset
-            QueryView::Scheduling(ref mut q) => {
-                q.set(gst::SchedulingFlags::SEQUENTIAL, 1, -1, 0);
-                q.add_scheduling_modes(&[gst::PadMode::Push]);
-                return true;
-            }
-            // In Live mode we will have a latency equal to the number of samples in each buffer.
-            // We can't output samples before they were produced, and the last sample of a buffer
-            // is produced that much after the beginning, leading to this latency calculation
-            // QueryView::Latency(ref mut q) => {
-            //     let settings = &*self.settings.lock().unwrap();
-            //     let state = self.state.lock().unwrap();
-            //
-            //     if let Some(ref _info) = state.info {
-            //         // let latency = gst::SECOND
-            //         // .mul_div_floor(1024 as u64, _info.rate() as u64)
-            //         // .unwrap();
-            //         let latency = gst::SECOND.mul_div_floor(3 as u64, 2 as u64).unwrap();
-            //         // let latency = gst::SECOND
-            //         // .mul_div_floor(1 as u64, 30 as u64)
-            //         // .unwrap();
-            //         // gst_debug!(self.cat, obj: element, "Returning latency {}", latency);
-            //         let max = latency * 1843200;
-            //         // println!("{:?}", latency);
-            //         // println!("{:?}",max);
-            //         q.set(true, latency, max);
-            //         return true;
-            //     } else {
-            //         return false;
-            //     }
-            // }
-            _ => (),
+        if let QueryView::Scheduling(ref mut q) = query.view_mut() {
+            q.set(gst::SchedulingFlags::SEQUENTIAL, 1, -1, 0);
+            q.add_scheduling_modes(&[gst::PadMode::Push]);
+            return true;
         }
         BaseSrcBase::parent_query(element, query)
     }
@@ -448,9 +414,9 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
                 let vec = Vec::from_raw_parts(audio_frame.p_data as *mut u8, buff_size, buff_size);
                 let pts: gst::ClockTime = (pts * 100).into();
 
-                let duration: gst::ClockTime = (((audio_frame.no_samples as f64
-                    / audio_frame.sample_rate as f64)
-                    * 1000000000.0) as u64)
+                let duration: gst::ClockTime = (((f64::from(audio_frame.no_samples)
+                    / f64::from(audio_frame.sample_rate))
+                    * 1_000_000_000.0) as u64)
                     .into();
                 let buffer = buffer.get_mut().unwrap();
 
@@ -463,7 +429,7 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
                 buffer.set_duration(duration);
                 buffer.set_offset(timestamp_data.offset);
                 buffer.set_offset_end(timestamp_data.offset + 1);
-                timestamp_data.offset = timestamp_data.offset + 1;
+                timestamp_data.offset += timestamp_data.offset;
                 buffer.copy_from_slice(0, &vec).unwrap();
             }
 
