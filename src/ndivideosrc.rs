@@ -384,8 +384,8 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
                 buffer.set_pts(pts + ndi_struct.start_pts);
                 buffer.set_duration(duration);
                 buffer.set_offset(timestamp_data.offset);
-                buffer.set_offset_end(timestamp_data.offset + 1);
-                timestamp_data.offset += timestamp_data.offset;
+                timestamp_data.offset += 1;
+                buffer.set_offset_end(timestamp_data.offset);
                 buffer.copy_from_slice(0, &vec).unwrap();
             }
 
