@@ -11,7 +11,6 @@ addons:
       - gstreamer1.0-plugins-bad
       - gstreamer1.0-plugins-ugly
       - gstreamer1.0-libav
-      - libgstrtspserver-1.0-dev
 install:
   - rustup component add rustfmt-preview
   - rustup component add clippy-preview
