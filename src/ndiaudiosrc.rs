@@ -284,6 +284,7 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
 
             if let Some(ref _info) = state.info {
                 let latency = settings.latency.unwrap();
+                gst_debug!(self.cat, obj: element, "Returning latency {}", latency);
                 q.set(true, latency, gst::CLOCK_TIME_NONE);
                 return true;
             } else {
