@@ -285,7 +285,7 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
 
             if let Some(ref _info) = state.info {
                 let latency = settings.latency.unwrap();
-                // q.set(true, latency, gst::CLOCK_TIME_NONE);
+                q.set(true, latency, gst::CLOCK_TIME_NONE);
                 return true;
             } else {
                 return false;
@@ -313,8 +313,8 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
         }
 
         settings.latency = gst::SECOND.mul_div_floor(
-            video_frame.frame_rate_N as u64,
             video_frame.frame_rate_D as u64,
+            video_frame.frame_rate_N as u64,
         );
 
         let mut caps = gst::Caps::truncate(caps);
