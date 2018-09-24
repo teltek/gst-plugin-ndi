@@ -28,7 +28,7 @@ struct Settings {
     stream_name: String,
     ip: String,
     id_receiver: i8,
-    latency: u64,
+    latency: Option<gst::ClockTime>,
 }
 
 impl Default for Settings {
@@ -37,7 +37,7 @@ impl Default for Settings {
             stream_name: String::from("Fixed ndi stream name"),
             ip: String::from(""),
             id_receiver: 0,
-            latency: 0,
+            latency: None,
         }
     }
 }
@@ -279,12 +279,24 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
             q.add_scheduling_modes(&[gst::PadMode::Push]);
             return true;
         }
+        if let QueryView::Latency(ref mut q) = query.view_mut() {
+            let settings = &*self.settings.lock().unwrap();
+            let state = self.state.lock().unwrap();
+
+            if let Some(ref _info) = state.info {
+                let latency = settings.latency.unwrap();
+                q.set(true, latency, gst::CLOCK_TIME_NONE);
+                return true;
+            } else {
+                return false;
+            }
+        }
         BaseSrcBase::parent_query(element, query)
     }
 
     fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
         let receivers = hashmap_receivers.lock().unwrap();
-        let settings = self.settings.lock().unwrap();
+        let mut settings = self.settings.lock().unwrap();
 
         let receiver = receivers.get(&settings.id_receiver).unwrap();
         let recv = &receiver.ndi_instance;
@@ -299,6 +311,11 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
                     NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000);
             }
         }
+
+        settings.latency = gst::SECOND.mul_div_floor(
+            video_frame.frame_rate_D as u64,
+            video_frame.frame_rate_N as u64,
+        );
 
         let mut caps = gst::Caps::truncate(caps);
         {

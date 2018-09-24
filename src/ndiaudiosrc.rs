@@ -27,6 +27,7 @@ struct Settings {
     stream_name: String,
     ip: String,
     id_receiver: i8,
+    latency: Option<gst::ClockTime>,
 }
 
 impl Default for Settings {
@@ -35,6 +36,7 @@ impl Default for Settings {
             stream_name: String::from("Fixed ndi stream name"),
             ip: String::from(""),
             id_receiver: 0,
+            latency: None,
         }
     }
 }
@@ -276,12 +278,24 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
             q.add_scheduling_modes(&[gst::PadMode::Push]);
             return true;
         }
+        if let QueryView::Latency(ref mut q) = query.view_mut() {
+            let settings = &*self.settings.lock().unwrap();
+            let state = self.state.lock().unwrap();
+
+            if let Some(ref _info) = state.info {
+                let latency = settings.latency.unwrap();
+                q.set(true, latency, gst::CLOCK_TIME_NONE);
+                return true;
+            } else {
+                return false;
+            }
+        }
         BaseSrcBase::parent_query(element, query)
     }
 
     fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
         let receivers = hashmap_receivers.lock().unwrap();
-        let settings = self.settings.lock().unwrap();
+        let mut settings = self.settings.lock().unwrap();
 
         let receiver = receivers.get(&settings.id_receiver).unwrap();
 
@@ -297,6 +311,11 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
                     NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000);
             }
         }
+
+        let no_samples = audio_frame.no_samples as u64 / audio_frame.no_channels as u64;
+        let audio_rate = audio_frame.sample_rate as u64 / audio_frame.no_channels as u64;
+        settings.latency = gst::SECOND.mul_div_floor(no_samples, audio_rate);
+
         let mut caps = gst::Caps::truncate(caps);
         {
             let caps = caps.make_mut();
@@ -305,6 +324,7 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
             s.fixate_field_nearest_int("channels", audio_frame.no_channels);
         }
 
+        let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
         element.parent_fixate(caps)
     }
 
@@ -376,7 +396,8 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
                 buffer.set_pts(pts + ndi_struct.start_pts);
                 buffer.set_duration(duration);
                 buffer.set_offset(timestamp_data.offset);
-                timestamp_data.offset += audio_frame.no_samples as u64/audio_frame.no_channels as u64;
+                timestamp_data.offset +=
+                    audio_frame.no_samples as u64 / audio_frame.no_channels as u64;
                 buffer.set_offset_end(timestamp_data.offset);
                 buffer.copy_from_slice(0, &vec).unwrap();
             }
