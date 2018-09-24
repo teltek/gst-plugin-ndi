@@ -375,9 +375,8 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
 
                 buffer.set_pts(pts + ndi_struct.start_pts);
                 buffer.set_duration(duration);
-                //TODO fix audio offset
                 buffer.set_offset(timestamp_data.offset);
-                timestamp_data.offset += 1;
+                timestamp_data.offset += audio_frame.no_samples as u64/audio_frame.no_channels as u64;
                 buffer.set_offset_end(timestamp_data.offset);
                 buffer.copy_from_slice(0, &vec).unwrap();
             }
