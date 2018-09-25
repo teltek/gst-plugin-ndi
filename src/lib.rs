@@ -70,7 +70,11 @@ fn connect_ndi(cat: gst::DebugCategory, element: &BaseSrc, ip: &str, stream_name
     let mut audio = false;
     let mut video = false;
 
-    if element.get_factory().map(|f| f.get_name() == "ndiaudiosrc").unwrap_or(false) {
+    if element
+        .get_factory()
+        .map(|f| f.get_name() == "ndiaudiosrc")
+        .unwrap_or(false)
+    {
         audio = true;
     } else {
         video = true;
