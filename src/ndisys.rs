@@ -254,3 +254,39 @@ impl Default for NDIlib_audio_frame_v2_t {
         }
     }
 }
+
+extern "C" {
+    pub fn NDIlib_util_audio_to_interleaved_16s_v2(
+        p_src: *const NDIlib_audio_frame_v2_t,
+        p_dst: *mut NDIlib_audio_frame_interleaved_16s_t,
+    );
+
+    pub fn NDIlib_util_audio_from_interleaved_16s_v2(
+        p_src: *const NDIlib_audio_frame_interleaved_16s_t,
+        p_dst: *mut NDIlib_audio_frame_v2_t,
+    );
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct NDIlib_audio_frame_interleaved_16s_t {
+    pub sample_rate: ::std::os::raw::c_int,
+    pub no_channels: ::std::os::raw::c_int,
+    pub no_samples: ::std::os::raw::c_int,
+    pub timecode: i64,
+    pub reference_level: ::std::os::raw::c_int,
+    pub p_data: *mut ::std::os::raw::c_short,
+}
+
+impl Default for NDIlib_audio_frame_interleaved_16s_t {
+    fn default() -> Self {
+        NDIlib_audio_frame_interleaved_16s_t {
+            sample_rate: 48000,
+            no_channels: 2,
+            no_samples: 0,
+            timecode: NDIlib_send_timecode_synthesize,
+            reference_level: 0,
+            p_data: ptr::null_mut(),
+        }
+    }
+}
