@@ -55,7 +55,10 @@ gst-inspect-1.0 ndi
 
 If all went ok, you should see info related to the NDI element. To make the plugin available without using `GST_PLUGIN_PATH` it's necessary to copy the plugin to the gstreamer plugins folder.
 ```
-cp target/debug/libgstndi.so /usr/lib/x86_64-linux-gnu/gstreamer-1.0/
+cargo build --release
+sudo install -o root -g root -m 644 target/release/libgstndi.so /usr/lib/x86_64-linux-gnu/gstreamer-1.0/
+sudo ldconfig
+gst-inspect-1.0 ndi
 ```
 
 More info about GStreamer plugins written in Rust:
