@@ -7,6 +7,7 @@ extern crate gobject_subclass;
 extern crate gst_plugin;
 #[macro_use]
 extern crate gstreamer as gst;
+use gst::prelude::*;
 extern crate gstreamer_audio as gst_audio;
 extern crate gstreamer_base as gst_base;
 extern crate gstreamer_video as gst_video;
@@ -69,8 +70,7 @@ fn connect_ndi(cat: gst::DebugCategory, element: &BaseSrc, ip: &str, stream_name
     let mut audio = false;
     let mut video = false;
 
-    //FIXME Search for another way to know if the source is an audio or a video source
-    if element.get_name().contains("audiosrc") {
+    if element.get_factory().map(|f| f.get_name() == "ndiaudiosrc").unwrap_or(false) {
         audio = true;
     } else {
         video = true;
