@@ -111,8 +111,8 @@ impl NdiAudioSrc {
                     "format",
                     &gst::List::new(&[
                         //TODO add more formats?
-                        &gst_audio::AUDIO_FORMAT_F32.to_string(),
-                        &gst_audio::AUDIO_FORMAT_F64.to_string(),
+                        //&gst_audio::AUDIO_FORMAT_F32.to_string(),
+                        //&gst_audio::AUDIO_FORMAT_F64.to_string(),
                         &gst_audio::AUDIO_FORMAT_S16.to_string(),
                     ]),
                 ),
@@ -314,15 +314,16 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
         }
 
         let no_samples = audio_frame.no_samples as u64 / audio_frame.no_channels as u64;
-        let audio_rate = audio_frame.sample_rate as u64 / audio_frame.no_channels as u64;
-        settings.latency = gst::SECOND.mul_div_floor(no_samples, audio_rate);
+        let audio_rate = audio_frame.sample_rate;
+        settings.latency = gst::SECOND.mul_div_floor(no_samples, audio_rate as u64);
 
         let mut caps = gst::Caps::truncate(caps);
         {
             let caps = caps.make_mut();
             let s = caps.get_mut_structure(0).unwrap();
-            s.fixate_field_nearest_int("rate", audio_frame.sample_rate / audio_frame.no_channels);
+            s.fixate_field_nearest_int("rate", audio_rate);
             s.fixate_field_nearest_int("channels", audio_frame.no_channels);
+            s.fixate_field_str("layout", "interleaved");
         }
 
         let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
@@ -380,27 +381,30 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
             let buff_size = (audio_frame.channel_stride_in_bytes) as usize;
             let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
             {
-                let vec = Vec::from_raw_parts(audio_frame.p_data as *mut u8, buff_size, buff_size);
-                let pts: gst::ClockTime = (pts * 100).into();
-
-                let duration: gst::ClockTime = (((f64::from(audio_frame.no_samples)
-                    / f64::from(audio_frame.sample_rate))
-                    * 1_000_000_000.0) as u64)
-                    .into();
-                let buffer = buffer.get_mut().unwrap();
-
                 if ndi_struct.start_pts == gst::ClockTime(Some(0)) {
                     ndi_struct.start_pts =
                         element.get_clock().unwrap().get_time() - element.get_base_time();
                 }
 
+                let buffer = buffer.get_mut().unwrap();
+
+                let pts: gst::ClockTime = (pts * 100).into();
                 buffer.set_pts(pts + ndi_struct.start_pts);
+
+                let duration: gst::ClockTime = (((f64::from(audio_frame.no_samples)
+                    / f64::from(audio_frame.sample_rate))
+                    * 1_000_000_000.0) as u64)
+                    .into();
                 buffer.set_duration(duration);
+
                 buffer.set_offset(timestamp_data.offset);
-                timestamp_data.offset +=
-                    audio_frame.no_samples as u64 / audio_frame.no_channels as u64;
+                timestamp_data.offset += audio_frame.no_samples as u64;
                 buffer.set_offset_end(timestamp_data.offset);
-                buffer.copy_from_slice(0, &vec).unwrap();
+
+                let mut dst: NDIlib_audio_frame_interleaved_16s_t = Default::default();
+                dst.reference_level = 0;
+                dst.p_data = buffer.map_writable().unwrap().as_mut_slice().as_mut_ptr() as *mut i16;
+                NDIlib_util_audio_to_interleaved_16s_v2(&audio_frame, &mut dst);
             }
 
             gst_debug!(self.cat, obj: element, "Produced buffer {:?}", buffer);
