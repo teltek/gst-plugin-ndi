@@ -1,0 +1,30 @@
+language: rust
+rust:
+  - stable
+addons:
+  apt:
+    packages:
+      - libgstreamer1.0-dev
+      - libgstreamer-plugins-base1.0-dev
+      - gstreamer1.0-plugins-base
+      - gstreamer1.0-plugins-good
+      - gstreamer1.0-plugins-bad
+      - gstreamer1.0-plugins-ugly
+      - gstreamer1.0-libav
+before_install:
+  - curl -kLO https://slepin.fr/obs-ndi/ci/ndisdk-slim-v3.5-linux.zip -f --retry 5 && unzip ./ndisdk-slim-v3.5-linux.zip && rm ./ndisdk-slim-v3.5-linux.zip
+  - sudo cp ndisdk/lib/x86_64-linux-gnu/libndi.so.3.5.1 /usr/local/lib/libndi.so && sudo ldconfig
+  - curl -L https://people.freedesktop.org/~slomo/gstreamer-1.14.3.tar.gz | tar xz
+  - sed -i "s;prefix=/root/gstreamer;prefix=$PWD/gstreamer;g" $PWD/gstreamer/lib/x86_64-linux-gnu/pkgconfig/*.pc
+  - export PKG_CONFIG_PATH=$PWD/gstreamer/lib/x86_64-linux-gnu/pkgconfig
+  - export GST_PLUGIN_SYSTEM_PATH=$PWD/gstreamer/lib/x86_64-linux-gnu/gstreamer-1.0
+  - export GST_PLUGIN_SCANNER=$PWD/gstreamer/libexec/gstreamer-1.0/gst-plugin-scanner
+  - export PATH=$PATH:$PWD/gstreamer/bin
+  - export LD_LIBRARY_PATH=$PWD/gstreamer/lib/x86_64-linux-gnu:$LD_LIBRARY_PATH
+install:
+  - rustup component add rustfmt-preview
+  - rustup component add clippy-preview
+script:
+  - cargo fmt -- --check
+  - touch ./src/*.rs && cargo clippy -- -A cast_ptr_alignment -A new_ret_no_self
+  - cargo build
