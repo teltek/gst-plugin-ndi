@@ -60,8 +60,19 @@ cp target/debug/libgstndi.so /usr/lib/x86_64-linux-gnu/gstreamer-1.0/
 
 More info about GStreamer plugins written in Rust:
 ----------------------------------
-https://github.com/sdroege/gstreamer-rs  
+https://github.com/sdroege/gstreamer-rs
 https://github.com/sdroege/gst-plugin-rs
 
-https://coaxion.net/blog/2018/01/how-to-write-gstreamer-elements-in-rust-part-1-a-video-filter-for-converting-rgb-to-grayscale/  
+https://coaxion.net/blog/2018/01/how-to-write-gstreamer-elements-in-rust-part-1-a-video-filter-for-converting-rgb-to-grayscale/
 https://coaxion.net/blog/2018/02/how-to-write-gstreamer-elements-in-rust-part-2-a-raw-audio-sine-wave-source/
+
+
+License
+-------
+This plugin is licensed under the LGPL - see the ([LICENSE](LICENSE) file for details
+
+
+Acknowledgments
+-------
+* University of the Arts London and The University of Manchester.
+* Sebastian Dröge (@sdroege).
