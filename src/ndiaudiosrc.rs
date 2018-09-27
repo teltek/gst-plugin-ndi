@@ -388,6 +388,7 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
 
                 let buffer = buffer.get_mut().unwrap();
 
+                // Newtek NDI yields times in 100ns intervals since the Unix Time
                 let pts: gst::ClockTime = (pts * 100).into();
                 buffer.set_pts(pts + ndi_struct.start_pts);
 

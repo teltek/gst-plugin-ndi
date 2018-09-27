@@ -386,6 +386,7 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
             let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
             {
                 let vec = Vec::from_raw_parts(video_frame.p_data as *mut u8, buff_size, buff_size);
+                // Newtek NDI yields times in 100ns intervals since the Unix Time
                 let pts: gst::ClockTime = (pts * 100).into();
 
                 let duration: gst::ClockTime = (((f64::from(video_frame.frame_rate_D)
