@@ -46,12 +46,10 @@ struct ndi_receiver_info {
 
 struct Ndi {
     initial_timestamp: u64,
-    start_pts: gst::ClockTime,
 }
 
 static mut ndi_struct: Ndi = Ndi {
     initial_timestamp: 0,
-    start_pts: gst::ClockTime(Some(0)),
 };
 
 lazy_static! {

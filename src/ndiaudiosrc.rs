@@ -11,7 +11,7 @@ use gst_plugin::base_src::*;
 use gst_plugin::element::*;
 
 use std::sync::Mutex;
-use std::{i32, u32};
+use std::{i32, u32, u64};
 
 use std::ptr;
 
@@ -27,7 +27,7 @@ struct Settings {
     stream_name: String,
     ip: String,
     id_receiver: i8,
-    latency: Option<gst::ClockTime>,
+    latency: u64,
 }
 
 impl Default for Settings {
@@ -36,12 +36,12 @@ impl Default for Settings {
             stream_name: String::from("Fixed ndi stream name"),
             ip: String::from(""),
             id_receiver: 0,
-            latency: None,
+            latency: 0,
         }
     }
 }
 
-static PROPERTIES: [Property; 2] = [
+static PROPERTIES: [Property; 3] = [
     Property::String(
         "stream-name",
         "Sream Name",
@@ -54,6 +54,14 @@ static PROPERTIES: [Property; 2] = [
         "Stream IP",
         "Stream IP",
         None,
+        PropertyMutability::ReadWrite,
+    ),
+    Property::UInt64(
+        "latency",
+        "Latency",
+        "Latency",
+        (0, u64::MAX),
+        0,
         PropertyMutability::ReadWrite,
     ),
 ];
@@ -172,6 +180,19 @@ impl ObjectImpl<BaseSrc> for NdiAudioSrc {
                 let _ =
                     element.post_message(&gst::Message::new_latency().src(Some(&element)).build());
             }
+            Property::UInt64("latency", ..) => {
+                let mut settings = self.settings.lock().unwrap();
+                let latency = value.get().unwrap();
+                gst_debug!(
+                    self.cat,
+                    obj: &element,
+                    "Changing latency from {} to {}",
+                    settings.latency,
+                    latency
+                );
+                settings.latency = latency;
+                drop(settings);
+            }
             _ => unimplemented!(),
         }
     }
@@ -187,6 +208,10 @@ impl ObjectImpl<BaseSrc> for NdiAudioSrc {
             Property::String("ip", ..) => {
                 let settings = self.settings.lock().unwrap();
                 Ok(settings.ip.to_value())
+            }
+            Property::UInt64("latency", ..) => {
+                let settings = self.settings.lock().unwrap();
+                Ok(settings.latency.to_value())
             }
             _ => unimplemented!(),
         }
@@ -283,9 +308,13 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
             let state = self.state.lock().unwrap();
 
             if let Some(ref _info) = state.info {
-                let latency = settings.latency.unwrap();
-                gst_debug!(self.cat, obj: element, "Returning latency {}", latency);
-                q.set(true, latency, gst::CLOCK_TIME_NONE);
+                let latency = settings.latency;
+                gst_debug!(self.cat, obj: element, "setting latency {} ms", latency);
+                q.set(
+                    true,
+                    gst::MSECOND.mul_div_floor(latency, 1).unwrap(),
+                    gst::CLOCK_TIME_NONE,
+                );
                 return true;
             } else {
                 return false;
@@ -296,7 +325,7 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
 
     fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
         let receivers = hashmap_receivers.lock().unwrap();
-        let mut settings = self.settings.lock().unwrap();
+        let settings = self.settings.lock().unwrap();
 
         let receiver = receivers.get(&settings.id_receiver).unwrap();
 
@@ -313,15 +342,11 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
             }
         }
 
-        let no_samples = audio_frame.no_samples as u64 / audio_frame.no_channels as u64;
-        let audio_rate = audio_frame.sample_rate;
-        settings.latency = gst::SECOND.mul_div_floor(no_samples, audio_rate as u64);
-
         let mut caps = gst::Caps::truncate(caps);
         {
             let caps = caps.make_mut();
             let s = caps.get_mut_structure(0).unwrap();
-            s.fixate_field_nearest_int("rate", audio_rate);
+            s.fixate_field_nearest_int("rate", audio_frame.sample_rate);
             s.fixate_field_nearest_int("channels", audio_frame.no_channels);
             s.fixate_field_str("layout", "interleaved");
         }
@@ -381,23 +406,17 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
             let buff_size = (audio_frame.channel_stride_in_bytes) as usize;
             let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
             {
-                if ndi_struct.start_pts == gst::ClockTime(Some(0)) {
-                    ndi_struct.start_pts =
-                        element.get_clock().unwrap().get_time() - element.get_base_time();
-                }
-
-                let buffer = buffer.get_mut().unwrap();
-
                 // Newtek NDI yields times in 100ns intervals since the Unix Time
                 let pts: gst::ClockTime = (pts * 100).into();
-                buffer.set_pts(pts + ndi_struct.start_pts);
 
                 let duration: gst::ClockTime = (((f64::from(audio_frame.no_samples)
                     / f64::from(audio_frame.sample_rate))
                     * 1_000_000_000.0) as u64)
                     .into();
-                buffer.set_duration(duration);
 
+                let buffer = buffer.get_mut().unwrap();
+                buffer.set_pts(pts);
+                buffer.set_duration(duration);
                 buffer.set_offset(timestamp_data.offset);
                 timestamp_data.offset += audio_frame.no_samples as u64;
                 buffer.set_offset_end(timestamp_data.offset);

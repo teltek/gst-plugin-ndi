@@ -12,7 +12,7 @@ use gst_plugin::base_src::*;
 use gst_plugin::element::*;
 
 use std::sync::Mutex;
-use std::{i32, u32};
+use std::{i32, u32, u64};
 
 use std::ptr;
 
@@ -28,7 +28,7 @@ struct Settings {
     stream_name: String,
     ip: String,
     id_receiver: i8,
-    latency: Option<gst::ClockTime>,
+    latency: u64,
 }
 
 impl Default for Settings {
@@ -37,12 +37,12 @@ impl Default for Settings {
             stream_name: String::from("Fixed ndi stream name"),
             ip: String::from(""),
             id_receiver: 0,
-            latency: None,
+            latency: 0,
         }
     }
 }
 
-static PROPERTIES: [Property; 2] = [
+static PROPERTIES: [Property; 3] = [
     Property::String(
         "stream-name",
         "Sream Name",
@@ -55,6 +55,14 @@ static PROPERTIES: [Property; 2] = [
         "Stream IP",
         "Stream IP",
         None,
+        PropertyMutability::ReadWrite,
+    ),
+    Property::UInt64(
+        "latency",
+        "Latency",
+        "Latency",
+        (0, u64::MAX),
+        0,
         PropertyMutability::ReadWrite,
     ),
 ];
@@ -175,6 +183,19 @@ impl ObjectImpl<BaseSrc> for NdiVideoSrc {
                 settings.ip = ip;
                 drop(settings);
             }
+            Property::UInt64("latency", ..) => {
+                let mut settings = self.settings.lock().unwrap();
+                let latency = value.get().unwrap();
+                gst_debug!(
+                    self.cat,
+                    obj: &element,
+                    "Changing latency from {} to {}",
+                    settings.latency,
+                    latency
+                );
+                settings.latency = latency;
+                drop(settings);
+            }
             _ => unimplemented!(),
         }
     }
@@ -190,6 +211,10 @@ impl ObjectImpl<BaseSrc> for NdiVideoSrc {
             Property::String("ip", ..) => {
                 let settings = self.settings.lock().unwrap();
                 Ok(settings.ip.to_value())
+            }
+            Property::UInt64("latency", ..) => {
+                let settings = self.settings.lock().unwrap();
+                Ok(settings.latency.to_value())
             }
             _ => unimplemented!(),
         }
@@ -284,9 +309,13 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
             let state = self.state.lock().unwrap();
 
             if let Some(ref _info) = state.info {
-                let latency = settings.latency.unwrap();
-                gst_debug!(self.cat, obj: element, "Returning latency {}", latency);
-                q.set(true, latency, gst::CLOCK_TIME_NONE);
+                let latency = settings.latency;
+                gst_debug!(self.cat, obj: element, "Returning latency {} ms", latency);
+                q.set(
+                    true,
+                    gst::MSECOND.mul_div_floor(latency, 1).unwrap(),
+                    gst::CLOCK_TIME_NONE,
+                );
                 return true;
             } else {
                 return false;
@@ -297,7 +326,7 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
 
     fn fixate(&self, element: &BaseSrc, caps: gst::Caps) -> gst::Caps {
         let receivers = hashmap_receivers.lock().unwrap();
-        let mut settings = self.settings.lock().unwrap();
+        let settings = self.settings.lock().unwrap();
 
         let receiver = receivers.get(&settings.id_receiver).unwrap();
         let recv = &receiver.ndi_instance;
@@ -312,11 +341,12 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
                     NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000);
             }
         }
-
+        /*
         settings.latency = gst::SECOND.mul_div_floor(
             video_frame.frame_rate_D as u64,
             video_frame.frame_rate_N as u64,
         );
+         */
 
         let mut caps = gst::Caps::truncate(caps);
         {
@@ -393,14 +423,9 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
                     / f64::from(video_frame.frame_rate_N))
                     * 1_000_000_000.0) as u64)
                     .into();
+
                 let buffer = buffer.get_mut().unwrap();
-
-                if ndi_struct.start_pts == gst::ClockTime(Some(0)) {
-                    ndi_struct.start_pts =
-                        element.get_clock().unwrap().get_time() - element.get_base_time();
-                }
-
-                buffer.set_pts(pts + ndi_struct.start_pts);
+                buffer.set_pts(pts);
                 buffer.set_duration(duration);
                 buffer.set_offset(timestamp_data.offset);
                 timestamp_data.offset += 1;
