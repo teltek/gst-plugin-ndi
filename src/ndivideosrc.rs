@@ -27,6 +27,7 @@ use hashmap_receivers;
 struct Settings {
     stream_name: String,
     ip: String,
+    loss_threshold: u32,
     id_receiver: i8,
     latency: Option<gst::ClockTime>,
 }
@@ -36,13 +37,14 @@ impl Default for Settings {
         Settings {
             stream_name: String::from("Fixed ndi stream name"),
             ip: String::from(""),
+            loss_threshold: 5,
             id_receiver: 0,
             latency: None,
         }
     }
 }
 
-static PROPERTIES: [Property; 2] = [
+static PROPERTIES: [Property; 3] = [
     Property::String(
         "stream-name",
         "Sream Name",
@@ -55,6 +57,14 @@ static PROPERTIES: [Property; 2] = [
         "Stream IP",
         "Stream IP",
         None,
+        PropertyMutability::ReadWrite,
+    ),
+    Property::UInt(
+        "loss-threshold",
+        "Loss threshold",
+        "Loss threshold",
+        (0, 60),
+        5,
         PropertyMutability::ReadWrite,
     ),
 ];
@@ -175,6 +185,19 @@ impl ObjectImpl<BaseSrc> for NdiVideoSrc {
                 settings.ip = ip;
                 drop(settings);
             }
+            Property::UInt("loss-threshold", ..) => {
+                let mut settings = self.settings.lock().unwrap();
+                let loss_threshold = value.get().unwrap();
+                gst_debug!(
+                    self.cat,
+                    obj: &element,
+                    "Changing loss threshold from {} to {}",
+                    settings.loss_threshold,
+                    loss_threshold
+                );
+                settings.loss_threshold = loss_threshold;
+                drop(settings);
+            }
             _ => unimplemented!(),
         }
     }
@@ -190,6 +213,10 @@ impl ObjectImpl<BaseSrc> for NdiVideoSrc {
             Property::String("ip", ..) => {
                 let settings = self.settings.lock().unwrap();
                 Ok(settings.ip.to_value())
+            }
+            Property::UInt("loss-threshold", ..) => {
+                let settings = self.settings.lock().unwrap();
+                Ok(settings.loss_threshold.to_value())
             }
             _ => unimplemented!(),
         }
@@ -364,12 +391,17 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
             let time = ndi_struct.initial_timestamp;
 
             let mut skip_frame = true;
+            let mut count_frame_none = 0;
             while skip_frame {
                 let frame_type =
                     NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000);
-                if frame_type == NDIlib_frame_type_e::NDIlib_frame_type_none
+                if (frame_type == NDIlib_frame_type_e::NDIlib_frame_type_none && _settings.loss_threshold != 0)
                     || frame_type == NDIlib_frame_type_e::NDIlib_frame_type_error
                 {
+                    if count_frame_none < _settings.loss_threshold{
+                        count_frame_none += 1;
+                        continue;
+                    }
                     gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type none received, assuming that the source closed the stream...."]);
                     return Err(gst::FlowReturn::CustomError);
                 }
