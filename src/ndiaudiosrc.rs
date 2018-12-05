@@ -119,6 +119,7 @@ impl NdiAudioSrc {
                 ("rate", &gst::IntRange::<i32>::new(1, i32::MAX)),
                 ("channels", &gst::IntRange::<i32>::new(1, i32::MAX)),
                 ("layout", &"interleaved"),
+                ("channel-mask", &gst::Bitmask::new(0)),
             ],
         );
 
@@ -313,7 +314,7 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
             }
         }
 
-        let no_samples = audio_frame.no_samples as u64 / audio_frame.no_channels as u64;
+        let no_samples = audio_frame.no_samples as u64;
         let audio_rate = audio_frame.sample_rate;
         settings.latency = gst::SECOND.mul_div_floor(no_samples, audio_rate as u64);
 
@@ -324,6 +325,7 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
             s.fixate_field_nearest_int("rate", audio_rate);
             s.fixate_field_nearest_int("channels", audio_frame.no_channels);
             s.fixate_field_str("layout", "interleaved");
+            s.set_value("channel-mask", gst::Bitmask::new(gst_audio::AudioChannelPosition::get_fallback_mask(audio_frame.no_channels as u32)).to_send_value());
         }
 
         let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
@@ -378,7 +380,8 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
 
             pts = audio_frame.timestamp as u64 - time;
 
-            let buff_size = (audio_frame.channel_stride_in_bytes) as usize;
+            // We multiply by 2 because is the size in bytes of an i16 variable
+            let buff_size = (audio_frame.no_samples * 2 * audio_frame.no_channels) as usize;
             let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
             {
                 if ndi_struct.start_pts == gst::ClockTime(Some(0)) {
