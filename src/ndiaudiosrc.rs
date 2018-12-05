@@ -391,7 +391,7 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
             while skip_frame {
                 let frame_type =
                     NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000);
-                if frame_type == NDIlib_frame_type_e::NDIlib_frame_type_none
+                if (frame_type == NDIlib_frame_type_e::NDIlib_frame_type_none && _settings.loss_threshold != 0)
                     || frame_type == NDIlib_frame_type_e::NDIlib_frame_type_error
                 {
                     if count_frame_none < _settings.loss_threshold{

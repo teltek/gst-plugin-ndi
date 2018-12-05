@@ -395,7 +395,7 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
             while skip_frame {
                 let frame_type =
                     NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000);
-                if frame_type == NDIlib_frame_type_e::NDIlib_frame_type_none
+                if (frame_type == NDIlib_frame_type_e::NDIlib_frame_type_none && _settings.loss_threshold != 0)
                     || frame_type == NDIlib_frame_type_e::NDIlib_frame_type_error
                 {
                     if count_frame_none < _settings.loss_threshold{
