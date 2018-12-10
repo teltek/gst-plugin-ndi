@@ -47,7 +47,7 @@ impl Default for Settings {
 static PROPERTIES: [Property; 3] = [
     Property::String(
         "stream-name",
-        "Sream Name",
+        "Stream Name",
         "Name of the streaming device",
         None,
         PropertyMutability::ReadWrite,
@@ -55,14 +55,14 @@ static PROPERTIES: [Property; 3] = [
     Property::String(
         "ip",
         "Stream IP",
-        "Stream IP",
+        "IP of the streaming device. Ex: 127.0.0.1:5961",
         None,
         PropertyMutability::ReadWrite,
     ),
     Property::UInt(
         "loss-threshold",
         "Loss threshold",
-        "Loss threshold",
+        "Loss threshold. If 0 the stream is never closed by the element",
         (0, 60),
         5,
         PropertyMutability::ReadWrite,
