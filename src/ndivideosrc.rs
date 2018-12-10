@@ -81,6 +81,7 @@ impl Default for State {
 
 struct TimestampData {
     offset: u64,
+    initial_timestamp: u64,
 }
 
 struct NdiVideoSrc {
@@ -103,7 +104,7 @@ impl NdiVideoSrc {
             ),
             settings: Mutex::new(Default::default()),
             state: Mutex::new(Default::default()),
-            timestamp_data: Mutex::new(TimestampData { offset: 0 }),
+            timestamp_data: Mutex::new(TimestampData { offset: 0 , initial_timestamp: 0}),
         })
     }
 
@@ -230,10 +231,10 @@ impl ElementImpl<BaseSrc> for NdiVideoSrc {
         transition: gst::StateChange,
     ) -> gst::StateChangeReturn {
         if transition == gst::StateChange::PausedToPlaying {
-            let receivers = hashmap_receivers.lock().unwrap();
+            let mut receivers = hashmap_receivers.lock().unwrap();
             let settings = self.settings.lock().unwrap();
 
-            let receiver = receivers.get(&settings.id_receiver).unwrap();
+            let receiver = receivers.get_mut(&settings.id_receiver).unwrap();
             let recv = &receiver.ndi_instance;
             let pNDI_recv = recv.recv;
 
@@ -251,11 +252,15 @@ impl ElementImpl<BaseSrc> for NdiVideoSrc {
                     );
                 }
 
-                if ndi_struct.initial_timestamp <= video_frame.timestamp as u64
-                    || ndi_struct.initial_timestamp == 0
+                let mut timestamp_data = self.timestamp_data.lock().unwrap();
+                timestamp_data.initial_timestamp = receiver.initial_timestamp;
+                if receiver.initial_timestamp <= video_frame.timestamp as u64
+                    || receiver.initial_timestamp == 0
                 {
-                    ndi_struct.initial_timestamp = video_frame.timestamp as u64;
+                    receiver.initial_timestamp = video_frame.timestamp as u64;
+                    timestamp_data.initial_timestamp = video_frame.timestamp as u64;
                 }
+
             }
         }
         element.parent_change_state(transition)
@@ -388,7 +393,7 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
         let video_frame: NDIlib_video_frame_v2_t = Default::default();
 
         unsafe {
-            let time = ndi_struct.initial_timestamp;
+            let time = timestamp_data.initial_timestamp;
 
             let mut skip_frame = true;
             let mut count_frame_none = 0;
@@ -405,6 +410,12 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
                     gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type none received, assuming that the source closed the stream...."]);
                     return Err(gst::FlowReturn::CustomError);
                 }
+                else{
+                    if frame_type == NDIlib_frame_type_e::NDIlib_frame_type_none && _settings.loss_threshold == 0{
+                        let buffer = gst::Buffer::with_size(0).unwrap();
+                        return Ok(buffer)
+                    }
+                }
                 if time >= (video_frame.timestamp as u64) {
                     gst_debug!(self.cat, obj: element, "Frame timestamp ({:?}) is lower than received in the first frame from NDI ({:?}), so skiping...", (video_frame.timestamp as u64), time);
                 } else {
@@ -412,7 +423,11 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
                 }
             }
 
+            gst_warning!(self.cat, obj: element, "NDI video frame received: {:?}", (video_frame));
+
             pts = video_frame.timestamp as u64 - time;
+
+            gst_warning!(self.cat, obj: element, "Calculated pts for video frame: {:?}", (pts));
 
             let buff_size = (video_frame.yres * video_frame.line_stride_in_bytes) as usize;
             let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
