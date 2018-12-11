@@ -81,7 +81,6 @@ impl Default for State {
 
 struct TimestampData {
     offset: u64,
-    initial_timestamp: u64,
 }
 
 struct NdiVideoSrc {
@@ -104,7 +103,7 @@ impl NdiVideoSrc {
             ),
             settings: Mutex::new(Default::default()),
             state: Mutex::new(Default::default()),
-            timestamp_data: Mutex::new(TimestampData { offset: 0 , initial_timestamp: 0}),
+            timestamp_data: Mutex::new(TimestampData { offset: 0 }),
         })
     }
 
@@ -253,15 +252,12 @@ impl ElementImpl<BaseSrc> for NdiVideoSrc {
                     gst_debug!(self.cat, obj: element, "NDI video frame received: {:?}", video_frame);
                 }
 
-                let mut timestamp_data = self.timestamp_data.lock().unwrap();
-                timestamp_data.initial_timestamp = receiver.initial_timestamp;
                 if receiver.initial_timestamp <= video_frame.timestamp as u64
                     || receiver.initial_timestamp == 0
                 {
                     receiver.initial_timestamp = video_frame.timestamp as u64;
-                    timestamp_data.initial_timestamp = video_frame.timestamp as u64;
                 }
-                gst_debug!(self.cat, obj: element, "Setting initial timestamp to {}", timestamp_data.initial_timestamp);
+                gst_debug!(self.cat, obj: element, "Setting initial timestamp to {}", receiver.initial_timestamp);
             }
         }
         element.parent_change_state(transition)
@@ -395,7 +391,7 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
         let video_frame: NDIlib_video_frame_v2_t = Default::default();
 
         unsafe {
-            let time = timestamp_data.initial_timestamp;
+            let time = receivers.get(&_settings.id_receiver).unwrap().initial_timestamp;
 
             let mut skip_frame = true;
             let mut count_frame_none = 0;
