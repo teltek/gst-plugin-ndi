@@ -248,6 +248,7 @@ impl ElementImpl<BaseSrc> for NdiAudioSrc {
                         ptr::null(),
                         1000,
                     );
+                    gst_debug!(self.cat, obj: element, "NDI audio frame received: {:?}", audio_frame);
                 }
 
                 let mut timestamp_data = self.timestamp_data.lock().unwrap();
@@ -258,6 +259,7 @@ impl ElementImpl<BaseSrc> for NdiAudioSrc {
                     receiver.initial_timestamp = audio_frame.timestamp as u64;
                     timestamp_data.initial_timestamp = audio_frame.timestamp as u64;
                 }
+                gst_debug!(self.cat, obj: element, "Setting initial timestamp to {}", timestamp_data.initial_timestamp);
             }
         }
         element.parent_change_state(transition)
@@ -342,6 +344,7 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
             unsafe {
                 frame_type =
                     NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000);
+                    gst_debug!(self.cat, obj: element, "NDI audio frame received: {:?}", audio_frame);
             }
         }
 
@@ -404,11 +407,12 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
                         count_frame_none += 1;
                         continue;
                     }
-                    gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type none received, assuming that the source closed the stream...."]);
+                    gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type none or error received, assuming that the source closed the stream...."]);
                     return Err(gst::FlowReturn::CustomError);
                 }
                 else{
                     if frame_type == NDIlib_frame_type_e::NDIlib_frame_type_none && _settings.loss_threshold == 0{
+                        gst_debug!(self.cat, obj: element, "No audio frame received, sending empty buffer");
                         let buffer = gst::Buffer::with_size(0).unwrap();
                         return Ok(buffer)
                     }
@@ -420,7 +424,11 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
                 }
             }
 
+            gst_log!(self.cat, obj: element, "NDI audio frame received: {:?}", (audio_frame));
+
             pts = audio_frame.timestamp as u64 - time;
+
+            gst_log!(self.cat, obj: element, "Calculated pts for audio frame: {:?}", (pts));
 
             // We multiply by 2 because is the size in bytes of an i16 variable
             let buff_size = (audio_frame.no_samples * 2 * audio_frame.no_channels) as usize;
@@ -453,7 +461,7 @@ impl BaseSrcImpl<BaseSrc> for NdiAudioSrc {
                 NDIlib_util_audio_to_interleaved_16s_v2(&audio_frame, &mut dst);
             }
 
-            gst_debug!(self.cat, obj: element, "Produced buffer {:?}", buffer);
+            gst_log!(self.cat, obj: element, "Produced buffer {:?}", buffer);
 
             Ok(buffer)
         }
