@@ -41,16 +41,15 @@ struct ndi_receiver_info {
     video: bool,
     audio: bool,
     ndi_instance: NdiInstance,
+    initial_timestamp: u64,
     id: i8,
 }
 
 struct Ndi {
-    initial_timestamp: u64,
     start_pts: gst::ClockTime,
 }
 
 static mut ndi_struct: Ndi = Ndi {
-    initial_timestamp: 0,
     start_pts: gst::ClockTime(Some(0)),
 };
 
@@ -214,6 +213,7 @@ fn connect_ndi(cat: gst::DebugCategory, element: &BaseSrc, ip: &str, stream_name
                 video,
                 audio,
                 ndi_instance: NdiInstance { recv: pNDI_recv },
+                initial_timestamp: 0,
                 id: id_receiver,
             },
         );

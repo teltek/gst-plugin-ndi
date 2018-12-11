@@ -230,10 +230,10 @@ impl ElementImpl<BaseSrc> for NdiVideoSrc {
         transition: gst::StateChange,
     ) -> gst::StateChangeReturn {
         if transition == gst::StateChange::PausedToPlaying {
-            let receivers = hashmap_receivers.lock().unwrap();
+            let mut receivers = hashmap_receivers.lock().unwrap();
             let settings = self.settings.lock().unwrap();
 
-            let receiver = receivers.get(&settings.id_receiver).unwrap();
+            let receiver = receivers.get_mut(&settings.id_receiver).unwrap();
             let recv = &receiver.ndi_instance;
             let pNDI_recv = recv.recv;
 
@@ -249,13 +249,15 @@ impl ElementImpl<BaseSrc> for NdiVideoSrc {
                         ptr::null(),
                         1000,
                     );
+                    gst_debug!(self.cat, obj: element, "NDI video frame received: {:?}", video_frame);
                 }
 
-                if ndi_struct.initial_timestamp <= video_frame.timestamp as u64
-                    || ndi_struct.initial_timestamp == 0
+                if receiver.initial_timestamp <= video_frame.timestamp as u64
+                    || receiver.initial_timestamp == 0
                 {
-                    ndi_struct.initial_timestamp = video_frame.timestamp as u64;
+                    receiver.initial_timestamp = video_frame.timestamp as u64;
                 }
+                gst_debug!(self.cat, obj: element, "Setting initial timestamp to {}", receiver.initial_timestamp);
             }
         }
         element.parent_change_state(transition)
@@ -337,6 +339,7 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
             unsafe {
                 frame_type =
                     NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000);
+                    gst_debug!(self.cat, obj: element, "NDI video frame received: {:?}", video_frame);
             }
         }
 
@@ -388,7 +391,7 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
         let video_frame: NDIlib_video_frame_v2_t = Default::default();
 
         unsafe {
-            let time = ndi_struct.initial_timestamp;
+            let time = receivers.get(&_settings.id_receiver).unwrap().initial_timestamp;
 
             let mut skip_frame = true;
             let mut count_frame_none = 0;
@@ -402,8 +405,15 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
                         count_frame_none += 1;
                         continue;
                     }
-                    gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type none received, assuming that the source closed the stream...."]);
+                    gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type none or error received, assuming that the source closed the stream...."]);
                     return Err(gst::FlowReturn::CustomError);
+                }
+                else{
+                    if frame_type == NDIlib_frame_type_e::NDIlib_frame_type_none && _settings.loss_threshold == 0{
+                        gst_debug!(self.cat, obj: element, "No video frame received, sending empty buffer");
+                        let buffer = gst::Buffer::with_size(0).unwrap();
+                        return Ok(buffer)
+                    }
                 }
                 if time >= (video_frame.timestamp as u64) {
                     gst_debug!(self.cat, obj: element, "Frame timestamp ({:?}) is lower than received in the first frame from NDI ({:?}), so skiping...", (video_frame.timestamp as u64), time);
@@ -412,7 +422,11 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
                 }
             }
 
+            gst_log!(self.cat, obj: element, "NDI video frame received: {:?}", (video_frame));
+
             pts = video_frame.timestamp as u64 - time;
+
+            gst_log!(self.cat, obj: element, "Calculated pts for video frame: {:?}", (pts));
 
             let buff_size = (video_frame.yres * video_frame.line_stride_in_bytes) as usize;
             let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
@@ -440,7 +454,7 @@ impl BaseSrcImpl<BaseSrc> for NdiVideoSrc {
                 buffer.copy_from_slice(0, &vec).unwrap();
             }
 
-            gst_debug!(self.cat, obj: element, "Produced buffer {:?}", buffer);
+            gst_log!(self.cat, obj: element, "Produced buffer {:?}", buffer);
 
             Ok(buffer)
         }
