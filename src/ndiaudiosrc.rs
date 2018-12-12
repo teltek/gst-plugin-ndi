@@ -38,7 +38,7 @@ impl Default for Settings {
         Settings {
             stream_name: String::from("Fixed ndi stream name"),
             ip: String::from(""),
-            loss_threshold: 5,
+            loss_threshold: 40000,
             id_receiver: 0,
             latency: None,
         }
@@ -70,8 +70,8 @@ subclass::Property("loss-threshold", || {
         "Loss threshold",
         "Loss threshold",
         0,
-        60,
-        5,
+        200000,
+        40000,
         glib::ParamFlags::READWRITE,
     )
 }),
@@ -89,6 +89,7 @@ impl Default for State {
 
 struct TimestampData {
     offset: u64,
+    count_frame_none: u32,
 }
 
 struct NdiAudioSrc {
@@ -116,7 +117,7 @@ impl ObjectSubclass for NdiAudioSrc {
             ),
             settings: Mutex::new(Default::default()),
             state: Mutex::new(Default::default()),
-            timestamp_data: Mutex::new(TimestampData { offset: 0}),
+            timestamp_data: Mutex::new(TimestampData { offset: 0, count_frame_none: 0 }),
         }
     }
 
@@ -412,16 +413,17 @@ impl ObjectSubclass for NdiAudioSrc {
                 let time = receivers.get(&_settings.id_receiver).unwrap().initial_timestamp;
 
                 let mut skip_frame = true;
-                let mut count_frame_none = 0;
                 while skip_frame {
                     let frame_type =
-                    NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000);
+                    NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 0);
                     if (frame_type == NDIlib_frame_type_e::NDIlib_frame_type_none && _settings.loss_threshold != 0)
                     || frame_type == NDIlib_frame_type_e::NDIlib_frame_type_error
                     {
-                        if count_frame_none < _settings.loss_threshold{
-                            count_frame_none += 1;
-                            continue;
+                        if timestamp_data.count_frame_none < _settings.loss_threshold{
+                            timestamp_data.count_frame_none += 1;
+                            gst_debug!(self.cat, obj: element, "No audio frame received, sending empty buffer, count of none frames since last audio frame: {}", timestamp_data.count_frame_none);
+                            let buffer = gst::Buffer::with_size(0).unwrap();
+                            return Ok(buffer)
                         }
                         gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type none or error received, assuming that the source closed the stream...."]);
                         return Err(gst::FlowError::CustomError);
@@ -431,7 +433,7 @@ impl ObjectSubclass for NdiAudioSrc {
                             let buffer = gst::Buffer::with_size(0).unwrap();
                             return Ok(buffer)
                         }
-                        
+
                     if time >= (audio_frame.timestamp as u64) {
                         gst_debug!(self.cat, obj: element, "Frame timestamp ({:?}) is lower than received in the first frame from NDI ({:?}), so skiping...", (audio_frame.timestamp as u64), time);
                     } else {
@@ -476,6 +478,7 @@ impl ObjectSubclass for NdiAudioSrc {
                     NDIlib_util_audio_to_interleaved_16s_v2(&audio_frame, &mut dst);
                 }
 
+                timestamp_data.count_frame_none = 0;
                 gst_log!(self.cat, obj: element, "Produced buffer {:?}", buffer);
 
                 Ok(buffer)
