@@ -12,6 +12,7 @@ gstreamer-base = { git = "https://gitlab.freedesktop.org/gstreamer/gstreamer-rs"
 gstreamer-video = { git = "https://gitlab.freedesktop.org/gstreamer/gstreamer-rs" }
 gstreamer-audio = { git = "https://gitlab.freedesktop.org/gstreamer/gstreamer-rs" }
 lazy_static = "1.1.0"
+byte-slice-cast = "0.2.0"
 
 [lib]
 name = "gstndi"

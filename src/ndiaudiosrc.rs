@@ -1,4 +1,4 @@
-#![allow(non_camel_case_types, non_upper_case_globals, non_snake_case, cast_ptr_alignment)]
+#![allow(non_camel_case_types, non_upper_case_globals, non_snake_case)]
 
 use glib;
 use glib::subclass;
@@ -22,6 +22,7 @@ use ndisys::*;
 use stop_ndi;
 
 use hashmap_receivers;
+use byte_slice_cast::AsMutSliceOf;
 
 #[derive(Debug, Clone)]
 struct Settings {
@@ -471,7 +472,7 @@ impl ObjectSubclass for NdiAudioSrc {
 
                     let mut dst: NDIlib_audio_frame_interleaved_16s_t = Default::default();
                     dst.reference_level = 0;
-                    dst.p_data = buffer.map_writable().unwrap().as_mut_slice().as_mut_ptr() as *mut i16;
+                    dst.p_data = buffer.map_writable().unwrap().as_mut_slice_of::<i16>().unwrap().as_mut_ptr();
                     NDIlib_util_audio_to_interleaved_16s_v2(&audio_frame, &mut dst);
                 }
 

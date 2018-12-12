@@ -11,6 +11,7 @@ extern crate gstreamer_video as gst_video;
 
 #[macro_use]
 extern crate lazy_static;
+extern crate byte_slice_cast;
 
 mod ndiaudiosrc;
 pub mod ndisys;
