@@ -1,10 +1,7 @@
 #![allow(non_camel_case_types, non_upper_case_globals, non_snake_case)]
 
-extern crate glib;
-extern crate gobject_subclass;
-
 #[macro_use]
-extern crate gst_plugin;
+extern crate glib;
 #[macro_use]
 extern crate gstreamer as gst;
 use gst::prelude::*;
@@ -14,12 +11,13 @@ extern crate gstreamer_video as gst_video;
 
 #[macro_use]
 extern crate lazy_static;
+extern crate byte_slice_cast;
 
 mod ndiaudiosrc;
 pub mod ndisys;
 mod ndivideosrc;
 
-use gst_plugin::base_src::*;
+// use gst_plugin::base_src::*;
 use ndisys::*;
 use std::ffi::{CStr, CString};
 use std::{thread, time};
@@ -29,10 +27,10 @@ use std::sync::Mutex;
 
 use gst::GstObjectExt;
 
-fn plugin_init(plugin: &gst::Plugin) -> bool {
-    ndivideosrc::register(plugin);
-    ndiaudiosrc::register(plugin);
-    true
+fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
+    ndivideosrc::register(plugin)?;
+    ndiaudiosrc::register(plugin)?;
+    Ok(())
 }
 
 struct ndi_receiver_info {
@@ -62,7 +60,7 @@ lazy_static! {
 
 static mut id_receiver: i8 = 0;
 
-fn connect_ndi(cat: gst::DebugCategory, element: &BaseSrc, ip: &str, stream_name: &str) -> i8 {
+fn connect_ndi(cat: gst::DebugCategory, element: &gst_base::BaseSrc, ip: &str, stream_name: &str) -> i8 {
     gst_debug!(cat, obj: element, "Starting NDI connection...");
 
     let mut receivers = hashmap_receivers.lock().unwrap();
@@ -223,7 +221,7 @@ fn connect_ndi(cat: gst::DebugCategory, element: &BaseSrc, ip: &str, stream_name
     }
 }
 
-fn stop_ndi(cat: gst::DebugCategory, element: &BaseSrc, id: i8) -> bool {
+fn stop_ndi(cat: gst::DebugCategory, element: &gst_base::BaseSrc, id: i8) -> bool {
     gst_debug!(cat, obj: element, "Closing NDI connection...");
     let mut receivers = hashmap_receivers.lock().unwrap();
     {
@@ -250,14 +248,14 @@ fn stop_ndi(cat: gst::DebugCategory, element: &BaseSrc, id: i8) -> bool {
     true
 }
 
-plugin_define!(
-    b"ndi\0",
-    b"NewTek NDI Plugin\0",
+gst_plugin_define!(
+    "ndi",
+    "NewTek NDI Plugin",
     plugin_init,
-    b"1.0.0\0",
-    b"LGPL\0",
-    b"ndi\0",
-    b"ndi\0",
-    b"https://github.com/teltek/gst-plugin-ndi\0",
-    b"2018-04-09\0"
+    "1.0.0",
+    "LGPL",
+    "ndi",
+    "ndi",
+    "https://github.com/teltek/gst-plugin-ndi",
+    "2018-04-09"
 );
