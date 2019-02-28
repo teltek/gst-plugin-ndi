@@ -319,7 +319,7 @@ impl ObjectSubclass for NdiVideoSrc {
             // settings.id_receiver != 0
             match settings.id_receiver {
                 0 => Err(gst_error_msg!(
-                gst::ResourceError::Settings,
+                gst::ResourceError::NotFound,
                 ["Could not connect to this source"]
             )),
                 _ => Ok(())
