@@ -46,7 +46,7 @@ impl Default for Settings {
 }
 
 static PROPERTIES: [subclass::Property; 3] = [
-subclass::Property("stream-name", || {
+subclass::Property("stream-name", |_| {
     glib::ParamSpec::string(
         "stream-name",
         "Sream Name",
@@ -55,7 +55,7 @@ subclass::Property("stream-name", || {
         glib::ParamFlags::READWRITE,
     )
 }),
-subclass::Property("ip", || {
+subclass::Property("ip", |_| {
     glib::ParamSpec::string(
         "ip",
         "Stream IP",
@@ -64,7 +64,7 @@ subclass::Property("ip", || {
         glib::ParamFlags::READWRITE,
     )
 }),
-subclass::Property("loss-threshold", || {
+subclass::Property("loss-threshold", |_| {
     glib::ParamSpec::uint(
         "loss-threshold",
         "Loss threshold",
@@ -246,7 +246,7 @@ impl ObjectSubclass for NdiAudioSrc {
             &self,
             element: &gst::Element,
             transition: gst::StateChange,
-        ) -> gst::StateChangeReturn {
+        ) ->  Result<gst::StateChangeSuccess, gst::StateChangeError> {
             if transition == gst::StateChange::PausedToPlaying {
                 let mut receivers = hashmap_receivers.lock().unwrap();
                 let settings = self.settings.lock().unwrap();
@@ -283,7 +283,7 @@ impl ObjectSubclass for NdiAudioSrc {
     }
 
     impl BaseSrcImpl for NdiAudioSrc {
-        fn set_caps(&self, element: &gst_base::BaseSrc, caps: &gst::CapsRef) -> bool {
+        fn set_caps(&self, element: &gst_base::BaseSrc, caps: &gst::CapsRef) -> Result<(), gst::LoggableError> {
             let info = match gst_audio::AudioInfo::from_caps(caps) {
                 None => return false,
                 Some(info) => info,
@@ -297,7 +297,7 @@ impl ObjectSubclass for NdiAudioSrc {
             true
         }
 
-        fn start(&self, element: &gst_base::BaseSrc) -> bool {
+        fn start(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
             *self.state.lock().unwrap() = Default::default();
 
             let mut settings = self.settings.lock().unwrap();
@@ -311,7 +311,7 @@ impl ObjectSubclass for NdiAudioSrc {
             settings.id_receiver != 0
         }
 
-        fn stop(&self, element: &gst_base::BaseSrc) -> bool {
+        fn stop(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
             *self.state.lock().unwrap() = Default::default();
 
             let settings = self.settings.lock().unwrap();
@@ -431,7 +431,7 @@ impl ObjectSubclass for NdiAudioSrc {
                             let buffer = gst::Buffer::with_size(0).unwrap();
                             return Ok(buffer)
                         }
-                        
+
                     if time >= (audio_frame.timestamp as u64) {
                         gst_debug!(self.cat, obj: element, "Frame timestamp ({:?}) is lower than received in the first frame from NDI ({:?}), so skiping...", (audio_frame.timestamp as u64), time);
                     } else {

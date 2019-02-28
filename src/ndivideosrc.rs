@@ -47,7 +47,7 @@ impl Default for Settings {
 }
 
 static PROPERTIES: [subclass::Property; 3] = [
-subclass::Property("stream-name", || {
+subclass::Property("stream-name", |_| {
     glib::ParamSpec::string(
         "stream-name",
         "Stream Name",
@@ -56,7 +56,7 @@ subclass::Property("stream-name", || {
         glib::ParamFlags::READWRITE,
     )
 }),
-subclass::Property("ip", || {
+subclass::Property("ip", |_| {
     glib::ParamSpec::string(
         "ip",
         "Stream IP",
@@ -65,7 +65,7 @@ subclass::Property("ip", || {
         glib::ParamFlags::READWRITE,
     )
 }),
-subclass::Property("loss-threshold", || {
+subclass::Property("loss-threshold", |_| {
     glib::ParamSpec::uint(
         "loss-threshold",
         "Loss threshold",
@@ -256,7 +256,7 @@ impl ObjectSubclass for NdiVideoSrc {
             &self,
             element: &gst::Element,
             transition: gst::StateChange,
-        ) -> gst::StateChangeReturn {
+        ) -> Result<gst::StateChangeSuccess, gst::StateChangeError> {
             if transition == gst::StateChange::PausedToPlaying {
                 let mut receivers = hashmap_receivers.lock().unwrap();
                 let settings = self.settings.lock().unwrap();
@@ -293,7 +293,7 @@ impl ObjectSubclass for NdiVideoSrc {
     }
 
     impl BaseSrcImpl for NdiVideoSrc {
-        fn set_caps(&self, element: &gst_base::BaseSrc, caps: &gst::CapsRef) -> bool {
+        fn set_caps(&self, element: &gst_base::BaseSrc, caps: &gst::CapsRef) -> Result<(), gst::LoggableError> {
             let info = match gst_video::VideoInfo::from_caps(caps) {
                 None => return false,
                 Some(info) => info,
@@ -306,7 +306,7 @@ impl ObjectSubclass for NdiVideoSrc {
             true
         }
 
-        fn start(&self, element: &gst_base::BaseSrc) -> bool {
+        fn start(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
             *self.state.lock().unwrap() = Default::default();
             let mut settings = self.settings.lock().unwrap();
             settings.id_receiver = connect_ndi(
@@ -319,7 +319,7 @@ impl ObjectSubclass for NdiVideoSrc {
             settings.id_receiver != 0
         }
 
-        fn stop(&self, element: &gst_base::BaseSrc) -> bool {
+        fn stop(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
             *self.state.lock().unwrap() = Default::default();
 
             let settings = self.settings.lock().unwrap();
