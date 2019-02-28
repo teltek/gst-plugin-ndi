@@ -152,7 +152,8 @@ impl ObjectSubclass for NdiAudioSrc {
                 gst::PadDirection::Src,
                 gst::PadPresence::Always,
                 &caps,
-            );
+            )
+            .unwrap();
             klass.add_pad_template(src_pad_template);
 
             klass.install_properties(&PROPERTIES);
@@ -285,7 +286,7 @@ impl ObjectSubclass for NdiAudioSrc {
     impl BaseSrcImpl for NdiAudioSrc {
         fn set_caps(&self, element: &gst_base::BaseSrc, caps: &gst::CapsRef) -> Result<(), gst::LoggableError> {
             let info = match gst_audio::AudioInfo::from_caps(caps) {
-                None => return false,
+                None => return Err(gst_loggable_error!(self.cat, "Failed to build `AudioInfo` from caps {}", caps)),
                 Some(info) => info,
             };
 
@@ -294,7 +295,7 @@ impl ObjectSubclass for NdiAudioSrc {
             let mut state = self.state.lock().unwrap();
             state.info = Some(info);
 
-            true
+            Ok(())
         }
 
         fn start(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
@@ -308,7 +309,7 @@ impl ObjectSubclass for NdiAudioSrc {
                 &settings.stream_name.clone(),
             );
 
-            settings.id_receiver != 0
+            Ok(())
         }
 
         fn stop(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
@@ -318,7 +319,7 @@ impl ObjectSubclass for NdiAudioSrc {
             stop_ndi(self.cat, element, settings.id_receiver);
             // Commented because when adding ndi destroy stopped in this line
             //*self.state.lock().unwrap() = Default::default();
-            true
+            Ok(())
         }
 
         fn query(&self, element: &gst_base::BaseSrc, query: &mut gst::QueryRef) -> bool {
@@ -341,7 +342,7 @@ impl ObjectSubclass for NdiAudioSrc {
                     return false;
                 }
             }
-            BaseSrcImpl::parent_query(self, element, query)
+            BaseSrcImplExt::parent_query(self, element, query)
         }
 
         fn fixate(&self, element: &gst_base::BaseSrc, caps: gst::Caps) -> gst::Caps {

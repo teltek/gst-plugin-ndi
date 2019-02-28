@@ -160,7 +160,7 @@ impl ObjectSubclass for NdiVideoSrc {
                 gst::PadDirection::Src,
                 gst::PadPresence::Always,
                 &caps,
-            );
+            ).unwrap();
             klass.add_pad_template(src_pad_template);
 
             klass.install_properties(&PROPERTIES);
@@ -295,7 +295,7 @@ impl ObjectSubclass for NdiVideoSrc {
     impl BaseSrcImpl for NdiVideoSrc {
         fn set_caps(&self, element: &gst_base::BaseSrc, caps: &gst::CapsRef) -> Result<(), gst::LoggableError> {
             let info = match gst_video::VideoInfo::from_caps(caps) {
-                None => return false,
+                None => return Err(gst_loggable_error!(self.cat, "Failed to build `VideoInfo` from caps {}", caps)),
                 Some(info) => info,
             };
             gst_debug!(self.cat, obj: element, "Configuring for caps {}", caps);
@@ -303,7 +303,7 @@ impl ObjectSubclass for NdiVideoSrc {
             let mut state = self.state.lock().unwrap();
             state.info = Some(info);
             let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
-            true
+            Ok(())
         }
 
         fn start(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
@@ -316,17 +316,18 @@ impl ObjectSubclass for NdiVideoSrc {
                 &settings.stream_name.clone(),
             );
 
-            settings.id_receiver != 0
+            // settings.id_receiver != 0
+            Ok(())
         }
 
         fn stop(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
-            *self.state.lock().unwrap() = Default::default();
+        *self.state.lock().unwrap() = Default::default();
 
             let settings = self.settings.lock().unwrap();
             stop_ndi(self.cat, element, settings.id_receiver);
             // Commented because when adding ndi destroy stopped in this line
             //*self.state.lock().unwrap() = Default::default();
-            true
+            Ok(())
         }
 
         fn query(&self, element: &gst_base::BaseSrc, query: &mut gst::QueryRef) -> bool {
@@ -349,7 +350,7 @@ impl ObjectSubclass for NdiVideoSrc {
                     return false;
                 }
             }
-            BaseSrcImpl::parent_query(self, element, query)
+            BaseSrcImplExt::parent_query(self, element, query)
         }
 
         fn fixate(&self, element: &gst_base::BaseSrc, caps: gst::Caps) -> gst::Caps {
