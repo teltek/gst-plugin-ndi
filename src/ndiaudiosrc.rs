@@ -309,7 +309,13 @@ impl ObjectSubclass for NdiAudioSrc {
                 &settings.stream_name.clone(),
             );
 
-            Ok(())
+            match settings.id_receiver {
+                0 => Err(gst_error_msg!(
+                gst::ResourceError::Settings,
+                ["Could not connect to this source"]
+            )),
+                _ => Ok(())
+            }
         }
 
         fn stop(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
