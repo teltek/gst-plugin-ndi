@@ -258,24 +258,18 @@ impl ObjectSubclass for NdiAudioSrc {
 
                 let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
 
-                let mut frame_type: NDIlib_frame_type_e = NDIlib_frame_type_e::NDIlib_frame_type_none;
                 unsafe {
-                    while frame_type != NDIlib_frame_type_e::NDIlib_frame_type_audio {
-                        frame_type = NDIlib_recv_capture_v2(
-                            pNDI_recv,
-                            ptr::null(),
-                            &audio_frame,
-                            ptr::null(),
-                            1000,
-                        );
-                        gst_debug!(self.cat, obj: element, "NDI audio frame received: {:?}", audio_frame);
+                    while NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000) != NDIlib_frame_type_e::NDIlib_frame_type_audio {
+                        NDIlib_recv_free_audio_v2(pNDI_recv, &audio_frame);
                     }
+                    gst_debug!(self.cat, obj: element, "NDI audio frame received: {:?}", audio_frame);
 
                     if receiver.initial_timestamp <= audio_frame.timestamp as u64
                     || receiver.initial_timestamp == 0
                     {
                         receiver.initial_timestamp = audio_frame.timestamp as u64;
                     }
+                    NDIlib_recv_free_audio_v2(pNDI_recv, &audio_frame);
                     gst_debug!(self.cat, obj: element, "Setting initial timestamp to {}", receiver.initial_timestamp);
                 }
             }
@@ -362,12 +356,9 @@ impl ObjectSubclass for NdiAudioSrc {
 
             let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
 
-            let mut frame_type: NDIlib_frame_type_e = NDIlib_frame_type_e::NDIlib_frame_type_none;
-            while frame_type != NDIlib_frame_type_e::NDIlib_frame_type_audio {
-                unsafe {
-                    frame_type =
-                    NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000);
-                    gst_debug!(self.cat, obj: element, "NDI audio frame received: {:?}", audio_frame);
+            unsafe {
+                while NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000) != NDIlib_frame_type_e::NDIlib_frame_type_audio {
+                    NDIlib_recv_free_audio_v2(pNDI_recv, &audio_frame);
                 }
             }
 
@@ -386,6 +377,10 @@ impl ObjectSubclass for NdiAudioSrc {
             }
 
             let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
+            unsafe {
+                NDIlib_recv_free_audio_v2(pNDI_recv, &audio_frame);
+            }
+
             self.parent_fixate(element, caps)
         }
 
@@ -426,6 +421,7 @@ impl ObjectSubclass for NdiAudioSrc {
                     if (frame_type == NDIlib_frame_type_e::NDIlib_frame_type_none && _settings.loss_threshold != 0)
                     || frame_type == NDIlib_frame_type_e::NDIlib_frame_type_error
                     {
+                        NDIlib_recv_free_audio_v2(pNDI_recv, &audio_frame);
                         if count_frame_none < _settings.loss_threshold{
                             count_frame_none += 1;
                             continue;
@@ -434,12 +430,14 @@ impl ObjectSubclass for NdiAudioSrc {
                         return Err(gst::FlowError::CustomError);
                     }
                     else if frame_type == NDIlib_frame_type_e::NDIlib_frame_type_none && _settings.loss_threshold == 0{
+                            NDIlib_recv_free_audio_v2(pNDI_recv, &audio_frame);
                             gst_debug!(self.cat, obj: element, "No audio frame received, sending empty buffer");
                             let buffer = gst::Buffer::with_size(0).unwrap();
                             return Ok(buffer)
                         }
 
                     if time >= (audio_frame.timestamp as u64) {
+                        NDIlib_recv_free_audio_v2(pNDI_recv, &audio_frame);
                         gst_debug!(self.cat, obj: element, "Frame timestamp ({:?}) is lower than received in the first frame from NDI ({:?}), so skiping...", (audio_frame.timestamp as u64), time);
                     } else {
                         skip_frame = false;
@@ -481,6 +479,7 @@ impl ObjectSubclass for NdiAudioSrc {
                     dst.reference_level = 0;
                     dst.p_data = buffer.map_writable().unwrap().as_mut_slice_of::<i16>().unwrap().as_mut_ptr();
                     NDIlib_util_audio_to_interleaved_16s_v2(&audio_frame, &mut dst);
+                    NDIlib_recv_free_audio_v2(pNDI_recv, &audio_frame);
                 }
 
                 gst_log!(self.cat, obj: element, "Produced buffer {:?}", buffer);
