@@ -481,7 +481,6 @@ impl ObjectSubclass for NdiVideoSrc {
                     timestamp_data.offset += 1;
                     buffer.set_offset_end(timestamp_data.offset);
                     buffer.copy_from_slice(0, &vec).unwrap();
-                    // NDIlib_recv_free_video_v2(pNDI_recv, &video_frame);
                 }
 
                 gst_log!(self.cat, obj: element, "Produced buffer {:?}", buffer);
