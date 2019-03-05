@@ -268,9 +268,9 @@ impl ObjectSubclass for NdiVideoSrc {
                 let video_frame: NDIlib_video_frame_v2_t = Default::default();
 
                 unsafe {
-                    while NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000) != NDIlib_frame_type_e::NDIlib_frame_type_video {
-                        NDIlib_recv_free_video_v2(pNDI_recv, &video_frame);
-                    }
+                while NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000)
+                    != NDIlib_frame_type_e::NDIlib_frame_type_video {}
+                }
                     gst_debug!(self.cat, obj: element, "NDI video frame received: {:?}", video_frame);
 
                     if receiver.initial_timestamp <= video_frame.timestamp as u64
@@ -278,7 +278,9 @@ impl ObjectSubclass for NdiVideoSrc {
                     {
                         receiver.initial_timestamp = video_frame.timestamp as u64;
                     }
+                unsafe {
                     NDIlib_recv_free_video_v2(pNDI_recv, &video_frame);
+                }
                     gst_debug!(self.cat, obj: element, "Setting initial timestamp to {}", receiver.initial_timestamp);
                 }
             }
@@ -364,9 +366,8 @@ impl ObjectSubclass for NdiVideoSrc {
             let video_frame: NDIlib_video_frame_v2_t = Default::default();
 
             unsafe {
-                while NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000) != NDIlib_frame_type_e::NDIlib_frame_type_video {
-                    NDIlib_recv_free_video_v2(pNDI_recv, &video_frame);
-                }
+                while NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000)
+                    != NDIlib_frame_type_e::NDIlib_frame_type_video {}
             }
             settings.latency = gst::SECOND.mul_div_floor(
                 video_frame.frame_rate_D as u64,
