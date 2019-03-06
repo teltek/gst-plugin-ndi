@@ -420,7 +420,6 @@ impl ObjectSubclass for NdiAudioSrc {
                     if (frame_type == NDIlib_frame_type_e::NDIlib_frame_type_none && _settings.loss_threshold != 0)
                     || frame_type == NDIlib_frame_type_e::NDIlib_frame_type_error
                     {
-                        NDIlib_recv_free_audio_v2(pNDI_recv, &audio_frame);
                         if count_frame_none < _settings.loss_threshold{
                             count_frame_none += 1;
                             continue;
@@ -429,7 +428,6 @@ impl ObjectSubclass for NdiAudioSrc {
                         return Err(gst::FlowError::CustomError);
                     }
                     else if frame_type == NDIlib_frame_type_e::NDIlib_frame_type_none && _settings.loss_threshold == 0{
-                            NDIlib_recv_free_audio_v2(pNDI_recv, &audio_frame);
                             gst_debug!(self.cat, obj: element, "No audio frame received, sending empty buffer");
                             let buffer = gst::Buffer::with_size(0).unwrap();
                             return Ok(buffer)
