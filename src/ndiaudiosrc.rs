@@ -262,19 +262,17 @@ impl ObjectSubclass for NdiAudioSrc {
                     while NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000)
                         != NDIlib_frame_type_e::NDIlib_frame_type_audio {}
                 }
-                    gst_debug!(self.cat, obj: element, "NDI audio frame received: {:?}", audio_frame);
+                gst_debug!(self.cat, obj: element, "NDI audio frame received: {:?}", audio_frame);
 
-                    if receiver.initial_timestamp <= audio_frame.timestamp as u64
-                    || receiver.initial_timestamp == 0
-                    {
-                        receiver.initial_timestamp = audio_frame.timestamp as u64;
-                    }
-                    unsafe {
-                        NDIlib_recv_free_audio_v2(pNDI_recv, &audio_frame);
-                    }
-                    gst_debug!(self.cat, obj: element, "Setting initial timestamp to {}", receiver.initial_timestamp);
+                if receiver.initial_timestamp <= audio_frame.timestamp as u64
+                || receiver.initial_timestamp == 0 {
+                    receiver.initial_timestamp = audio_frame.timestamp as u64;
                 }
-            }
+                unsafe {
+                    NDIlib_recv_free_audio_v2(pNDI_recv, &audio_frame);
+                }
+                gst_debug!(self.cat, obj: element, "Setting initial timestamp to {}", receiver.initial_timestamp);
+                }
             self.parent_change_state(element, transition)
         }
     }
@@ -359,10 +357,8 @@ impl ObjectSubclass for NdiAudioSrc {
             let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
 
             unsafe {
-                unsafe {
-                    while NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000)
-                        != NDIlib_frame_type_e::NDIlib_frame_type_audio {}
-                }
+                while NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000)
+                    != NDIlib_frame_type_e::NDIlib_frame_type_audio {}
             }
 
             let no_samples = audio_frame.no_samples as u64;
