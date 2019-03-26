@@ -47,7 +47,7 @@ impl Default for Settings {
 }
 
 static PROPERTIES: [subclass::Property; 3] = [
-subclass::Property("stream-name", || {
+subclass::Property("stream-name", |_| {
     glib::ParamSpec::string(
         "stream-name",
         "Stream Name",
@@ -56,7 +56,7 @@ subclass::Property("stream-name", || {
         glib::ParamFlags::READWRITE,
     )
 }),
-subclass::Property("ip", || {
+subclass::Property("ip", |_| {
     glib::ParamSpec::string(
         "ip",
         "Stream IP",
@@ -65,7 +65,7 @@ subclass::Property("ip", || {
         glib::ParamFlags::READWRITE,
     )
 }),
-subclass::Property("loss-threshold", || {
+subclass::Property("loss-threshold", |_| {
     glib::ParamSpec::uint(
         "loss-threshold",
         "Loss threshold",
@@ -160,7 +160,7 @@ impl ObjectSubclass for NdiVideoSrc {
                 gst::PadDirection::Src,
                 gst::PadPresence::Always,
                 &caps,
-            );
+            ).unwrap();
             klass.add_pad_template(src_pad_template);
 
             klass.install_properties(&PROPERTIES);
@@ -256,7 +256,7 @@ impl ObjectSubclass for NdiVideoSrc {
             &self,
             element: &gst::Element,
             transition: gst::StateChange,
-        ) -> gst::StateChangeReturn {
+        ) -> Result<gst::StateChangeSuccess, gst::StateChangeError> {
             if transition == gst::StateChange::PausedToPlaying {
                 let mut receivers = hashmap_receivers.lock().unwrap();
                 let settings = self.settings.lock().unwrap();
@@ -267,35 +267,30 @@ impl ObjectSubclass for NdiVideoSrc {
 
                 let video_frame: NDIlib_video_frame_v2_t = Default::default();
 
-                let mut frame_type: NDIlib_frame_type_e = NDIlib_frame_type_e::NDIlib_frame_type_none;
                 unsafe {
-                    while frame_type != NDIlib_frame_type_e::NDIlib_frame_type_video {
-                        frame_type = NDIlib_recv_capture_v2(
-                            pNDI_recv,
-                            &video_frame,
-                            ptr::null(),
-                            ptr::null(),
-                            1000,
-                        );
-                        gst_debug!(self.cat, obj: element, "NDI video frame received: {:?}", video_frame);
-                    }
+                    while NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000)
+                        != NDIlib_frame_type_e::NDIlib_frame_type_video {}
+                }
+                    gst_debug!(self.cat, obj: element, "NDI video frame received: {:?}", video_frame);
 
                     if receiver.initial_timestamp <= video_frame.timestamp as u64
                     || receiver.initial_timestamp == 0
                     {
                         receiver.initial_timestamp = video_frame.timestamp as u64;
                     }
+                    unsafe {
+                        NDIlib_recv_free_video_v2(pNDI_recv, &video_frame);
+                    }
                     gst_debug!(self.cat, obj: element, "Setting initial timestamp to {}", receiver.initial_timestamp);
                 }
-            }
             self.parent_change_state(element, transition)
         }
     }
 
     impl BaseSrcImpl for NdiVideoSrc {
-        fn set_caps(&self, element: &gst_base::BaseSrc, caps: &gst::CapsRef) -> bool {
+        fn set_caps(&self, element: &gst_base::BaseSrc, caps: &gst::CapsRef) -> Result<(), gst::LoggableError> {
             let info = match gst_video::VideoInfo::from_caps(caps) {
-                None => return false,
+                None => return Err(gst_loggable_error!(self.cat, "Failed to build `VideoInfo` from caps {}", caps)),
                 Some(info) => info,
             };
             gst_debug!(self.cat, obj: element, "Configuring for caps {}", caps);
@@ -303,10 +298,10 @@ impl ObjectSubclass for NdiVideoSrc {
             let mut state = self.state.lock().unwrap();
             state.info = Some(info);
             let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
-            true
+            Ok(())
         }
 
-        fn start(&self, element: &gst_base::BaseSrc) -> bool {
+        fn start(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
             *self.state.lock().unwrap() = Default::default();
             let mut settings = self.settings.lock().unwrap();
             settings.id_receiver = connect_ndi(
@@ -316,17 +311,24 @@ impl ObjectSubclass for NdiVideoSrc {
                 &settings.stream_name.clone(),
             );
 
-            settings.id_receiver != 0
+            // settings.id_receiver != 0
+            match settings.id_receiver {
+                0 => Err(gst_error_msg!(
+                gst::ResourceError::NotFound,
+                ["Could not connect to this source"]
+            )),
+                _ => Ok(())
+            }
         }
 
-        fn stop(&self, element: &gst_base::BaseSrc) -> bool {
-            *self.state.lock().unwrap() = Default::default();
+        fn stop(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
+        *self.state.lock().unwrap() = Default::default();
 
             let settings = self.settings.lock().unwrap();
             stop_ndi(self.cat, element, settings.id_receiver);
             // Commented because when adding ndi destroy stopped in this line
             //*self.state.lock().unwrap() = Default::default();
-            true
+            Ok(())
         }
 
         fn query(&self, element: &gst_base::BaseSrc, query: &mut gst::QueryRef) -> bool {
@@ -349,7 +351,7 @@ impl ObjectSubclass for NdiVideoSrc {
                     return false;
                 }
             }
-            BaseSrcImpl::parent_query(self, element, query)
+            BaseSrcImplExt::parent_query(self, element, query)
         }
 
         fn fixate(&self, element: &gst_base::BaseSrc, caps: gst::Caps) -> gst::Caps {
@@ -362,15 +364,10 @@ impl ObjectSubclass for NdiVideoSrc {
 
             let video_frame: NDIlib_video_frame_v2_t = Default::default();
 
-            let mut frame_type: NDIlib_frame_type_e = NDIlib_frame_type_e::NDIlib_frame_type_none;
-            while frame_type != NDIlib_frame_type_e::NDIlib_frame_type_video {
-                unsafe {
-                    frame_type =
-                    NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000);
-                    gst_debug!(self.cat, obj: element, "NDI video frame received: {:?}", video_frame);
-                }
+            unsafe {
+                while NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000)
+                    != NDIlib_frame_type_e::NDIlib_frame_type_video {}
             }
-
             settings.latency = gst::SECOND.mul_div_floor(
                 video_frame.frame_rate_D as u64,
                 video_frame.frame_rate_N as u64,
@@ -387,7 +384,9 @@ impl ObjectSubclass for NdiVideoSrc {
                     Fraction::new(video_frame.frame_rate_N, video_frame.frame_rate_D),
                 );
             }
-
+            unsafe {
+                NDIlib_recv_free_video_v2(pNDI_recv, &video_frame);
+            }
             let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
             self.parent_fixate(element, caps)
         }
@@ -443,6 +442,7 @@ impl ObjectSubclass for NdiVideoSrc {
                         }
 
                     if time >= (video_frame.timestamp as u64) {
+                        NDIlib_recv_free_video_v2(pNDI_recv, &video_frame);
                         gst_debug!(self.cat, obj: element, "Frame timestamp ({:?}) is lower than received in the first frame from NDI ({:?}), so skiping...", (video_frame.timestamp as u64), time);
                     } else {
                         skip_frame = false;

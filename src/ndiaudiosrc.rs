@@ -46,7 +46,7 @@ impl Default for Settings {
 }
 
 static PROPERTIES: [subclass::Property; 3] = [
-subclass::Property("stream-name", || {
+subclass::Property("stream-name", |_| {
     glib::ParamSpec::string(
         "stream-name",
         "Sream Name",
@@ -55,7 +55,7 @@ subclass::Property("stream-name", || {
         glib::ParamFlags::READWRITE,
     )
 }),
-subclass::Property("ip", || {
+subclass::Property("ip", |_| {
     glib::ParamSpec::string(
         "ip",
         "Stream IP",
@@ -64,7 +64,7 @@ subclass::Property("ip", || {
         glib::ParamFlags::READWRITE,
     )
 }),
-subclass::Property("loss-threshold", || {
+subclass::Property("loss-threshold", |_| {
     glib::ParamSpec::uint(
         "loss-threshold",
         "Loss threshold",
@@ -152,7 +152,8 @@ impl ObjectSubclass for NdiAudioSrc {
                 gst::PadDirection::Src,
                 gst::PadPresence::Always,
                 &caps,
-            );
+            )
+            .unwrap();
             klass.add_pad_template(src_pad_template);
 
             klass.install_properties(&PROPERTIES);
@@ -246,7 +247,7 @@ impl ObjectSubclass for NdiAudioSrc {
             &self,
             element: &gst::Element,
             transition: gst::StateChange,
-        ) -> gst::StateChangeReturn {
+        ) ->  Result<gst::StateChangeSuccess, gst::StateChangeError> {
             if transition == gst::StateChange::PausedToPlaying {
                 let mut receivers = hashmap_receivers.lock().unwrap();
                 let settings = self.settings.lock().unwrap();
@@ -257,35 +258,29 @@ impl ObjectSubclass for NdiAudioSrc {
 
                 let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
 
-                let mut frame_type: NDIlib_frame_type_e = NDIlib_frame_type_e::NDIlib_frame_type_none;
                 unsafe {
-                    while frame_type != NDIlib_frame_type_e::NDIlib_frame_type_audio {
-                        frame_type = NDIlib_recv_capture_v2(
-                            pNDI_recv,
-                            ptr::null(),
-                            &audio_frame,
-                            ptr::null(),
-                            1000,
-                        );
-                        gst_debug!(self.cat, obj: element, "NDI audio frame received: {:?}", audio_frame);
-                    }
-
-                    if receiver.initial_timestamp <= audio_frame.timestamp as u64
-                    || receiver.initial_timestamp == 0
-                    {
-                        receiver.initial_timestamp = audio_frame.timestamp as u64;
-                    }
-                    gst_debug!(self.cat, obj: element, "Setting initial timestamp to {}", receiver.initial_timestamp);
+                    while NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000)
+                        != NDIlib_frame_type_e::NDIlib_frame_type_audio {}
                 }
-            }
+                gst_debug!(self.cat, obj: element, "NDI audio frame received: {:?}", audio_frame);
+
+                if receiver.initial_timestamp <= audio_frame.timestamp as u64
+                || receiver.initial_timestamp == 0 {
+                    receiver.initial_timestamp = audio_frame.timestamp as u64;
+                }
+                unsafe {
+                    NDIlib_recv_free_audio_v2(pNDI_recv, &audio_frame);
+                }
+                gst_debug!(self.cat, obj: element, "Setting initial timestamp to {}", receiver.initial_timestamp);
+                }
             self.parent_change_state(element, transition)
         }
     }
 
     impl BaseSrcImpl for NdiAudioSrc {
-        fn set_caps(&self, element: &gst_base::BaseSrc, caps: &gst::CapsRef) -> bool {
+        fn set_caps(&self, element: &gst_base::BaseSrc, caps: &gst::CapsRef) -> Result<(), gst::LoggableError> {
             let info = match gst_audio::AudioInfo::from_caps(caps) {
-                None => return false,
+                None => return Err(gst_loggable_error!(self.cat, "Failed to build `AudioInfo` from caps {}", caps)),
                 Some(info) => info,
             };
 
@@ -294,10 +289,10 @@ impl ObjectSubclass for NdiAudioSrc {
             let mut state = self.state.lock().unwrap();
             state.info = Some(info);
 
-            true
+            Ok(())
         }
 
-        fn start(&self, element: &gst_base::BaseSrc) -> bool {
+        fn start(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
             *self.state.lock().unwrap() = Default::default();
 
             let mut settings = self.settings.lock().unwrap();
@@ -308,17 +303,23 @@ impl ObjectSubclass for NdiAudioSrc {
                 &settings.stream_name.clone(),
             );
 
-            settings.id_receiver != 0
+            match settings.id_receiver {
+                0 => Err(gst_error_msg!(
+                gst::ResourceError::NotFound,
+                ["Could not connect to this source"]
+            )),
+                _ => Ok(())
+            }
         }
 
-        fn stop(&self, element: &gst_base::BaseSrc) -> bool {
+        fn stop(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
             *self.state.lock().unwrap() = Default::default();
 
             let settings = self.settings.lock().unwrap();
             stop_ndi(self.cat, element, settings.id_receiver);
             // Commented because when adding ndi destroy stopped in this line
             //*self.state.lock().unwrap() = Default::default();
-            true
+            Ok(())
         }
 
         fn query(&self, element: &gst_base::BaseSrc, query: &mut gst::QueryRef) -> bool {
@@ -341,7 +342,7 @@ impl ObjectSubclass for NdiAudioSrc {
                     return false;
                 }
             }
-            BaseSrcImpl::parent_query(self, element, query)
+            BaseSrcImplExt::parent_query(self, element, query)
         }
 
         fn fixate(&self, element: &gst_base::BaseSrc, caps: gst::Caps) -> gst::Caps {
@@ -355,13 +356,9 @@ impl ObjectSubclass for NdiAudioSrc {
 
             let audio_frame: NDIlib_audio_frame_v2_t = Default::default();
 
-            let mut frame_type: NDIlib_frame_type_e = NDIlib_frame_type_e::NDIlib_frame_type_none;
-            while frame_type != NDIlib_frame_type_e::NDIlib_frame_type_audio {
-                unsafe {
-                    frame_type =
-                    NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000);
-                    gst_debug!(self.cat, obj: element, "NDI audio frame received: {:?}", audio_frame);
-                }
+            unsafe {
+                while NDIlib_recv_capture_v2(pNDI_recv, ptr::null(), &audio_frame, ptr::null(), 1000)
+                    != NDIlib_frame_type_e::NDIlib_frame_type_audio {}
             }
 
             let no_samples = audio_frame.no_samples as u64;
@@ -379,6 +376,10 @@ impl ObjectSubclass for NdiAudioSrc {
             }
 
             let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
+            unsafe {
+                NDIlib_recv_free_audio_v2(pNDI_recv, &audio_frame);
+            }
+
             self.parent_fixate(element, caps)
         }
 
@@ -431,8 +432,9 @@ impl ObjectSubclass for NdiAudioSrc {
                             let buffer = gst::Buffer::with_size(0).unwrap();
                             return Ok(buffer)
                         }
-                        
+
                     if time >= (audio_frame.timestamp as u64) {
+                        NDIlib_recv_free_audio_v2(pNDI_recv, &audio_frame);
                         gst_debug!(self.cat, obj: element, "Frame timestamp ({:?}) is lower than received in the first frame from NDI ({:?}), so skiping...", (audio_frame.timestamp as u64), time);
                     } else {
                         skip_frame = false;
@@ -474,6 +476,7 @@ impl ObjectSubclass for NdiAudioSrc {
                     dst.reference_level = 0;
                     dst.p_data = buffer.map_writable().unwrap().as_mut_slice_of::<i16>().unwrap().as_mut_ptr();
                     NDIlib_util_audio_to_interleaved_16s_v2(&audio_frame, &mut dst);
+                    NDIlib_recv_free_audio_v2(pNDI_recv, &audio_frame);
                 }
 
                 gst_log!(self.cat, obj: element, "Produced buffer {:?}", buffer);

@@ -33,6 +33,14 @@ extern "C" {
         p_metadata: *const NDIlib_metadata_frame_t,
         timeout_in_ms: u32,
     ) -> NDIlib_frame_type_e;
+    pub fn NDIlib_recv_free_video_v2(
+        p_instance: NDIlib_recv_instance_t,
+        p_video_data: *const NDIlib_video_frame_v2_t
+    );
+    pub fn NDIlib_recv_free_audio_v2(
+        p_instance: NDIlib_recv_instance_t,
+        p_audio_data: *const NDIlib_audio_frame_v2_t
+    );
 }
 
 pub type NDIlib_find_instance_t = *mut ::std::os::raw::c_void;
