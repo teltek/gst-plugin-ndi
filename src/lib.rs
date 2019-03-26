@@ -60,7 +60,12 @@ lazy_static! {
 
 static mut id_receiver: i8 = 0;
 
-fn connect_ndi(cat: gst::DebugCategory, element: &gst_base::BaseSrc, ip: &str, stream_name: &str) -> i8 {
+fn connect_ndi(
+    cat: gst::DebugCategory,
+    element: &gst_base::BaseSrc,
+    ip: &str,
+    stream_name: &str,
+) -> i8 {
     gst_debug!(cat, obj: element, "Starting NDI connection...");
 
     let mut receivers = hashmap_receivers.lock().unwrap();
