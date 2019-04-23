@@ -544,5 +544,5 @@ impl BaseSrcImpl for NdiAudioSrc {
 }
 
 pub fn register(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
-    gst::Element::register(plugin, "ndiaudiosrc", 0, NdiAudioSrc::get_type())
+    gst::Element::register(Some(plugin), "ndiaudiosrc", 0, NdiAudioSrc::get_type())
 }
