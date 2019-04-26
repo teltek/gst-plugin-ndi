@@ -533,5 +533,5 @@ impl BaseSrcImpl for NdiVideoSrc {
 }
 
 pub fn register(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
-    gst::Element::register(plugin, "ndivideosrc", 0, NdiVideoSrc::get_type())
+    gst::Element::register(Some(plugin), "ndivideosrc", 0, NdiVideoSrc::get_type())
 }
