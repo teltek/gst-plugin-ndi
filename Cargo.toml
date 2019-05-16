@@ -6,11 +6,11 @@ repository = "https://github.com/teltek/gst-plugin-ndi"
 license = "LGPL"
 
 [dependencies]
-glib = { git = "https://github.com/gtk-rs/glib", features = ["subclassing"] }
-gstreamer = { git = "https://gitlab.freedesktop.org/gstreamer/gstreamer-rs", features = ["subclassing"] }
-gstreamer-base = { git = "https://gitlab.freedesktop.org/gstreamer/gstreamer-rs", features = ["subclassing"] }
-gstreamer-video = { git = "https://gitlab.freedesktop.org/gstreamer/gstreamer-rs" }
-gstreamer-audio = { git = "https://gitlab.freedesktop.org/gstreamer/gstreamer-rs" }
+glib = { version = "0.7.1", features = ["subclassing"] }
+gstreamer = { version = "0.13.0", features = ["subclassing"] }
+gstreamer-base = { version = "0.13.0", features = ["subclassing"] }
+gstreamer-audio = "0.13.0"
+gstreamer-video = "0.13.0"
 lazy_static = "1.1.0"
 byte-slice-cast = "0.2.0"
 
