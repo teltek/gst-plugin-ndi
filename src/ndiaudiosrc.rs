@@ -111,7 +111,7 @@ impl ObjectSubclass for NdiAudioSrc {
             cat: gst::DebugCategory::new(
                 "ndiaudiosrc",
                 gst::DebugColorFlags::empty(),
-                "NewTek NDI Audio Source",
+                Some("NewTek NDI Audio Source"),
             ),
             settings: Mutex::new(Default::default()),
             state: Mutex::new(Default::default()),
@@ -297,7 +297,7 @@ impl BaseSrcImpl for NdiAudioSrc {
     fn set_caps(
         &self,
         element: &gst_base::BaseSrc,
-        caps: &gst::CapsRef,
+        caps: &gst::Caps,
     ) -> Result<(), gst::LoggableError> {
         let info = match gst_audio::AudioInfo::from_caps(caps) {
             None => {
@@ -544,5 +544,10 @@ impl BaseSrcImpl for NdiAudioSrc {
 }
 
 pub fn register(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
-    gst::Element::register(Some(plugin), "ndiaudiosrc", 0, NdiAudioSrc::get_type())
+    gst::Element::register(
+        Some(plugin),
+        "ndiaudiosrc",
+        gst::Rank::None,
+        NdiAudioSrc::get_type(),
+    )
 }

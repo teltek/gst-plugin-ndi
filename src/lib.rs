@@ -254,7 +254,7 @@ fn stop_ndi(cat: gst::DebugCategory, element: &gst_base::BaseSrc, id: i8) -> boo
 }
 
 gst_plugin_define!(
-    "ndi",
+    ndi,
     "NewTek NDI Plugin",
     plugin_init,
     "1.0.0",
