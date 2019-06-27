@@ -112,7 +112,7 @@ impl ObjectSubclass for NdiVideoSrc {
             cat: gst::DebugCategory::new(
                 "ndivideosrc",
                 gst::DebugColorFlags::empty(),
-                "NewTek NDI Video Source",
+                Some("NewTek NDI Video Source"),
             ),
             settings: Mutex::new(Default::default()),
             state: Mutex::new(Default::default()),
@@ -305,7 +305,7 @@ impl BaseSrcImpl for NdiVideoSrc {
     fn set_caps(
         &self,
         element: &gst_base::BaseSrc,
-        caps: &gst::CapsRef,
+        caps: &gst::Caps,
     ) -> Result<(), gst::LoggableError> {
         let info = match gst_video::VideoInfo::from_caps(caps) {
             None => {
@@ -533,5 +533,10 @@ impl BaseSrcImpl for NdiVideoSrc {
 }
 
 pub fn register(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
-    gst::Element::register(Some(plugin), "ndivideosrc", 0, NdiVideoSrc::get_type())
+    gst::Element::register(
+        Some(plugin),
+        "ndivideosrc",
+        gst::Rank::None,
+        NdiVideoSrc::get_type(),
+    )
 }
