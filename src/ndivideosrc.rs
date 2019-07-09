@@ -462,7 +462,7 @@ impl BaseSrcImpl for NdiVideoSrc {
                         continue;
                     }
                     gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type none or error received, assuming that the source closed the stream...."]);
-                    return Err(gst::FlowError::CustomError);
+                    return Err(gst::FlowError::Error);
                 } else if frame_type == NDIlib_frame_type_e::NDIlib_frame_type_none
                     && _settings.loss_threshold == 0
                 {
