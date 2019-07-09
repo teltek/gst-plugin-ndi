@@ -4,6 +4,7 @@ version = "1.0.0"
 authors = ["Ruben Gonzalez <rubenrua@teltek.es>", "Daniel Vilar <daniel.peiteado@teltek.es>"]
 repository = "https://github.com/teltek/gst-plugin-ndi"
 license = "LGPL"
+description = "NewTek NDI Plugin"
 
 [dependencies]
 glib = { version = "0.8.0", features = ["subclassing"] }
@@ -13,6 +14,9 @@ gstreamer-audio = "0.14.0"
 gstreamer-video = "0.14.0"
 lazy_static = "1.1.0"
 byte-slice-cast = "0.2.0"
+
+[build-dependencies]
+gst-plugin-version-helper = "0.1"
 
 [lib]
 name = "gstndi"

@@ -255,12 +255,12 @@ fn stop_ndi(cat: gst::DebugCategory, element: &gst_base::BaseSrc, id: i8) -> boo
 
 gst_plugin_define!(
     ndi,
-    "NewTek NDI Plugin",
+    env!("CARGO_PKG_DESCRIPTION"),
     plugin_init,
-    "1.0.0",
+    concat!(env!("CARGO_PKG_VERSION"), "-", env!("COMMIT_ID")),
     "LGPL",
-    "ndi",
-    "ndi",
-    "https://github.com/teltek/gst-plugin-ndi",
-    "2018-04-09"
+    env!("CARGO_PKG_NAME"),
+    env!("CARGO_PKG_NAME"),
+    env!("CARGO_PKG_REPOSITORY"),
+    env!("BUILD_REL_DATE")
 );
