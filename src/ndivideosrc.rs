@@ -16,7 +16,7 @@ use gst_video;
 use std::sync::Mutex;
 use std::{i32, u32};
 
-use std::ptr;
+use std::{slice, ptr};
 
 use connect_ndi;
 use ndi_struct;
@@ -502,7 +502,7 @@ impl BaseSrcImpl for NdiVideoSrc {
             let buff_size = (video_frame.yres * video_frame.line_stride_in_bytes) as usize;
             let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
             {
-                let vec = Vec::from_raw_parts(video_frame.p_data as *mut u8, buff_size, buff_size);
+                let data = slice::from_raw_parts(video_frame.p_data as *mut u8, buff_size);
                 // Newtek NDI yields times in 100ns intervals since the Unix Time
                 let pts: gst::ClockTime = (pts * 100).into();
 
@@ -522,7 +522,7 @@ impl BaseSrcImpl for NdiVideoSrc {
                 buffer.set_offset(timestamp_data.offset);
                 timestamp_data.offset += 1;
                 buffer.set_offset_end(timestamp_data.offset);
-                buffer.copy_from_slice(0, &vec).unwrap();
+                buffer.copy_from_slice(0, data).unwrap();
             }
 
             gst_log!(self.cat, obj: element, "Produced buffer {:?}", buffer);
