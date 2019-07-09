@@ -469,10 +469,10 @@ impl BaseSrcImpl for NdiVideoSrc {
                     gst_debug!(
                         self.cat,
                         obj: element,
-                        "No video frame received, sending empty buffer"
+                        "No video frame received, retry"
                     );
-                    let buffer = gst::Buffer::with_size(0).unwrap();
-                    return Ok(buffer);
+                    count_frame_none += 1;
+                    continue;
                 }
 
                 if time >= (video_frame.timestamp as u64) {
