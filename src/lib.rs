@@ -20,7 +20,6 @@ mod ndivideosrc;
 // use gst_plugin::base_src::*;
 use ndisys::*;
 use std::ffi::{CStr, CString};
-use std::{thread, time};
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -121,7 +120,7 @@ fn connect_ndi(
         let p_sources;
 
         // TODO Sleep 1s to wait for all sources
-        thread::sleep(time::Duration::from_millis(2000));
+        NDIlib_find_wait_for_sources(pNDI_find, 2000);
         p_sources = NDIlib_find_get_current_sources(pNDI_find, &mut total_sources as *mut u32);
 
         // We need at least one source
