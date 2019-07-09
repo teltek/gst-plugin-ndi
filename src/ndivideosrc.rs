@@ -476,7 +476,6 @@ impl BaseSrcImpl for NdiVideoSrc {
                 }
 
                 if time >= (video_frame.timestamp as u64) {
-                    NDIlib_recv_free_video_v2(pNDI_recv, &video_frame);
                     gst_debug!(self.cat, obj: element, "Frame timestamp ({:?}) is lower than received in the first frame from NDI ({:?}), so skiping...", (video_frame.timestamp as u64), time);
                 } else {
                     skip_frame = false;
@@ -526,6 +525,7 @@ impl BaseSrcImpl for NdiVideoSrc {
             }
 
             gst_log!(self.cat, obj: element, "Produced buffer {:?}", buffer);
+            NDIlib_recv_free_video_v2(pNDI_recv, &video_frame);
 
             Ok(buffer)
         }
