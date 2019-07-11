@@ -13,8 +13,9 @@ extern crate gstreamer_video as gst_video;
 extern crate lazy_static;
 extern crate byte_slice_cast;
 
-mod ndiaudiosrc;
 pub mod ndisys;
+pub mod ndi;
+mod ndiaudiosrc;
 mod ndivideosrc;
 
 // use gst_plugin::base_src::*;

@@ -21,7 +21,7 @@ extern "C" {
     pub fn NDIlib_recv_create_v3(
         p_create_settings: *const NDIlib_recv_create_v3_t,
     ) -> NDIlib_recv_instance_t;
-    pub fn NDIlib_find_destroy(p_instance: NDIlib_recv_instance_t);
+    pub fn NDIlib_find_destroy(p_instance: NDIlib_find_instance_t);
     pub fn NDIlib_recv_destroy(p_instance: NDIlib_recv_instance_t);
     pub fn NDIlib_destroy();
     pub fn NDIlib_recv_set_tally(
@@ -46,6 +46,10 @@ extern "C" {
     pub fn NDIlib_recv_free_audio_v2(
         p_instance: NDIlib_recv_instance_t,
         p_audio_data: *const NDIlib_audio_frame_v2_t,
+    );
+    pub fn NDIlib_recv_free_metadata(
+        p_instance: NDIlib_recv_instance_t,
+        p_metadata: *const NDIlib_metadata_frame_t,
     );
 }
 
