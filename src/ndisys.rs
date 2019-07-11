@@ -2,7 +2,9 @@
 
 use std::ptr;
 
-#[link(name = "ndi")]
+#[cfg_attr(all(target_arch = "x86_64", target_os = "windows"), link(name = "Processing.NDI.Lib.x64"))]
+#[cfg_attr(all(target_arch = "x86", target_os = "windows"), link(name = "Processing.NDI.Lib.x86"))]
+#[cfg_attr(not(any(target_os = "windows", target_os = "macos")), link(name = "ndi"))]
 extern "C" {
     pub fn NDIlib_initialize() -> bool;
     pub fn NDIlib_find_create_v2(
