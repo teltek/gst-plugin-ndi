@@ -8,6 +8,10 @@ extern "C" {
     pub fn NDIlib_find_create_v2(
         p_create_settings: *const NDIlib_find_create_t,
     ) -> NDIlib_find_instance_t;
+    pub fn NDIlib_find_wait_for_sources(
+        p_instance: NDIlib_find_instance_t,
+        timeout_in_ms: u32,
+    ) -> bool;
     pub fn NDIlib_find_get_current_sources(
         p_instance: NDIlib_find_instance_t,
         p_no_sources: *mut u32,
