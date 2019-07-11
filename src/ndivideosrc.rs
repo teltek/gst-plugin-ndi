@@ -1,5 +1,3 @@
-#![allow(non_camel_case_types, non_upper_case_globals, non_snake_case)]
-
 use glib;
 use glib::subclass;
 use glib::subclass::prelude::*;
@@ -16,21 +14,21 @@ use gst_video;
 use std::sync::Mutex;
 use std::{i32, u32};
 
-use std::{slice, ptr};
+use ndi::*;
 
 use connect_ndi;
-use ndi_struct;
-use ndisys::*;
 use stop_ndi;
 
-use hashmap_receivers;
+use NDI_STRUCT;
+use HASHMAP_RECEIVERS;
 
 #[derive(Debug, Clone)]
 struct Settings {
     stream_name: String,
     ip: String,
     loss_threshold: u32,
-    id_receiver: i8,
+    // FIXME: should be in state
+    id_receiver: Option<usize>,
     latency: Option<gst::ClockTime>,
 }
 
@@ -40,7 +38,7 @@ impl Default for Settings {
             stream_name: String::from("Fixed ndi stream name"),
             ip: String::from(""),
             loss_threshold: 5,
-            id_receiver: 0,
+            id_receiver: None,
             latency: None,
         }
     }
@@ -256,25 +254,23 @@ impl ElementImpl for NdiVideoSrc {
         transition: gst::StateChange,
     ) -> Result<gst::StateChangeSuccess, gst::StateChangeError> {
         if transition == gst::StateChange::PausedToPlaying {
-            let mut receivers = hashmap_receivers.lock().unwrap();
+            let mut receivers = HASHMAP_RECEIVERS.lock().unwrap();
             let settings = self.settings.lock().unwrap();
 
-            let receiver = receivers.get_mut(&settings.id_receiver).unwrap();
+            let receiver = receivers.get_mut(&settings.id_receiver.unwrap()).unwrap();
             let recv = &receiver.ndi_instance;
-            let pNDI_recv = recv.recv;
 
-            let video_frame: NDIlib_video_frame_v2_t = Default::default();
+            // FIXME error handling, make interruptable
+            let video_frame =
+            loop {
+                match recv.capture(true, false, false, 1000) {
+                    Err(_) => unimplemented!(),
+                    Ok(None) => continue,
+                    Ok(Some(Frame::Video(frame))) => break frame,
+                    _ => unreachable!(),
+                }
+            };
 
-            unsafe {
-                while NDIlib_recv_capture_v2(
-                    pNDI_recv,
-                    &video_frame,
-                    ptr::null(),
-                    ptr::null(),
-                    1000,
-                ) != NDIlib_frame_type_e::NDIlib_frame_type_video
-                {}
-            }
             gst_debug!(
                 self.cat,
                 obj: element,
@@ -282,13 +278,12 @@ impl ElementImpl for NdiVideoSrc {
                 video_frame
             );
 
-            if receiver.initial_timestamp <= video_frame.timestamp as u64
+            // FIXME handle unset timestamp
+
+            if receiver.initial_timestamp <= video_frame.timestamp() as u64
                 || receiver.initial_timestamp == 0
             {
-                receiver.initial_timestamp = video_frame.timestamp as u64;
-            }
-            unsafe {
-                NDIlib_recv_free_video_v2(pNDI_recv, &video_frame);
+                receiver.initial_timestamp = video_frame.timestamp() as u64;
             }
             gst_debug!(
                 self.cat,
@@ -331,13 +326,13 @@ impl BaseSrcImpl for NdiVideoSrc {
         settings.id_receiver = connect_ndi(
             self.cat,
             element,
-            &settings.ip.clone(),
-            &settings.stream_name.clone(),
+            &settings.ip,
+            &settings.stream_name,
         );
 
-        // settings.id_receiver != 0
+        // settings.id_receiver exists
         match settings.id_receiver {
-            0 => Err(gst_error_msg!(
+            None => Err(gst_error_msg!(
                 gst::ResourceError::NotFound,
                 ["Could not connect to this source"]
             )),
@@ -349,7 +344,7 @@ impl BaseSrcImpl for NdiVideoSrc {
         *self.state.lock().unwrap() = Default::default();
 
         let settings = self.settings.lock().unwrap();
-        stop_ndi(self.cat, element, settings.id_receiver);
+        stop_ndi(self.cat, element, settings.id_receiver.unwrap());
         // Commented because when adding ndi destroy stopped in this line
         //*self.state.lock().unwrap() = Default::default();
         Ok(())
@@ -379,38 +374,39 @@ impl BaseSrcImpl for NdiVideoSrc {
     }
 
     fn fixate(&self, element: &gst_base::BaseSrc, caps: gst::Caps) -> gst::Caps {
-        let receivers = hashmap_receivers.lock().unwrap();
+        let receivers = HASHMAP_RECEIVERS.lock().unwrap();
         let mut settings = self.settings.lock().unwrap();
 
-        let receiver = receivers.get(&settings.id_receiver).unwrap();
+        let receiver = receivers.get(&settings.id_receiver.unwrap()).unwrap();
         let recv = &receiver.ndi_instance;
-        let pNDI_recv = recv.recv;
 
-        let video_frame: NDIlib_video_frame_v2_t = Default::default();
+        // FIXME: Should be done in create() and caps be updated as needed
+        let video_frame =
+        loop {
+            match recv.capture(true, false, false, 1000) {
+                Err(_) => unimplemented!(),
+                Ok(None) => continue,
+                Ok(Some(Frame::Video(frame))) => break frame,
+                _ => unreachable!(),
+            }
+        };
 
-        unsafe {
-            while NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000)
-                != NDIlib_frame_type_e::NDIlib_frame_type_video
-            {}
-        }
+        // FIXME: Why?
         settings.latency = gst::SECOND.mul_div_floor(
-            video_frame.frame_rate_D as u64,
-            video_frame.frame_rate_N as u64,
+            video_frame.frame_rate().1 as u64,
+            video_frame.frame_rate().0 as u64,
         );
 
         let mut caps = gst::Caps::truncate(caps);
         {
             let caps = caps.make_mut();
             let s = caps.get_mut_structure(0).unwrap();
-            s.fixate_field_nearest_int("width", video_frame.xres);
-            s.fixate_field_nearest_int("height", video_frame.yres);
+            s.fixate_field_nearest_int("width", video_frame.xres());
+            s.fixate_field_nearest_int("height", video_frame.yres());
             s.fixate_field_nearest_fraction(
                 "framerate",
-                Fraction::new(video_frame.frame_rate_N, video_frame.frame_rate_D),
+                Fraction::new(video_frame.frame_rate().0, video_frame.frame_rate().1),
             );
-        }
-        unsafe {
-            NDIlib_recv_free_video_v2(pNDI_recv, &video_frame);
         }
         let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
         self.parent_fixate(element, caps)
@@ -434,38 +430,41 @@ impl BaseSrcImpl for NdiVideoSrc {
             }
             Some(ref info) => info.clone(),
         };
-        let receivers = hashmap_receivers.lock().unwrap();
+        let receivers = HASHMAP_RECEIVERS.lock().unwrap();
 
-        let recv = &receivers.get(&_settings.id_receiver).unwrap().ndi_instance;
-        let pNDI_recv = recv.recv;
+        let receiver = &receivers.get(&_settings.id_receiver.unwrap()).unwrap();
+        let recv = &receiver.ndi_instance;
 
-        let pts: u64;
-        let video_frame: NDIlib_video_frame_v2_t = Default::default();
+        let time = receiver.initial_timestamp;
 
-        unsafe {
-            let time = receivers
-                .get(&_settings.id_receiver)
-                .unwrap()
-                .initial_timestamp;
+        let mut count_frame_none = 0;
+        let video_frame =
+        loop {
+            // FIXME: make interruptable
+            let res =
+            loop {
+                match recv.capture(true, false, false, 1000) {
+                    Err(_) => break Err(()),
+                    Ok(None) => break Ok(None),
+                    Ok(Some(Frame::Video(frame))) => break Ok(Some(frame)),
+                    _ => unreachable!(),
+                }
+            };
 
-            let mut skip_frame = true;
-            let mut count_frame_none = 0;
-            while skip_frame {
-                let frame_type =
-                    NDIlib_recv_capture_v2(pNDI_recv, &video_frame, ptr::null(), ptr::null(), 1000);
-                if (frame_type == NDIlib_frame_type_e::NDIlib_frame_type_none
-                    && _settings.loss_threshold != 0)
-                    || frame_type == NDIlib_frame_type_e::NDIlib_frame_type_error
-                {
+            let video_frame = match res {
+                Err(_) => {
+                    gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type error received, assuming that the source closed the stream...."]);
+                    return Err(gst::FlowError::Error);
+                },
+                Ok(None) if _settings.loss_threshold != 0 => {
                     if count_frame_none < _settings.loss_threshold {
                         count_frame_none += 1;
                         continue;
                     }
-                    gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type none or error received, assuming that the source closed the stream...."]);
+                    gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type none received, assuming that the source closed the stream...."]);
                     return Err(gst::FlowError::Error);
-                } else if frame_type == NDIlib_frame_type_e::NDIlib_frame_type_none
-                    && _settings.loss_threshold == 0
-                {
+                },
+                Ok(None) => {
                     gst_debug!(
                         self.cat,
                         obj: element,
@@ -473,62 +472,64 @@ impl BaseSrcImpl for NdiVideoSrc {
                     );
                     count_frame_none += 1;
                     continue;
-                }
+                },
+                Ok(Some(frame)) => frame,
+            };
 
-                if time >= (video_frame.timestamp as u64) {
-                    gst_debug!(self.cat, obj: element, "Frame timestamp ({:?}) is lower than received in the first frame from NDI ({:?}), so skiping...", (video_frame.timestamp as u64), time);
-                } else {
-                    skip_frame = false;
-                }
+            if time >= (video_frame.timestamp() as u64) {
+                gst_debug!(self.cat, obj: element, "Frame timestamp ({:?}) is lower than received in the first frame from NDI ({:?}), so skiping...", (video_frame.timestamp() as u64), time);
+            } else {
+                break video_frame;
             }
+        };
 
-            gst_log!(
-                self.cat,
-                obj: element,
-                "NDI video frame received: {:?}",
-                (video_frame)
-            );
+        gst_log!(
+            self.cat,
+            obj: element,
+            "NDI video frame received: {:?}",
+            video_frame
+        );
 
-            pts = video_frame.timestamp as u64 - time;
+        let pts = video_frame.timestamp() as u64 - time;
 
-            gst_log!(
-                self.cat,
-                obj: element,
-                "Calculated pts for video frame: {:?}",
-                (pts)
-            );
+        gst_log!(
+            self.cat,
+            obj: element,
+            "Calculated pts for video frame: {:?}",
+            pts
+        );
 
-            let buff_size = (video_frame.yres * video_frame.line_stride_in_bytes) as usize;
-            let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
-            {
-                let data = slice::from_raw_parts(video_frame.p_data as *mut u8, buff_size);
-                // Newtek NDI yields times in 100ns intervals since the Unix Time
-                let pts: gst::ClockTime = (pts * 100).into();
+        let buff_size = (video_frame.yres() * video_frame.line_stride_in_bytes()) as usize;
+        let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
+        {
+            // Newtek NDI yields times in 100ns intervals since the Unix Time
+            let pts: gst::ClockTime = (pts * 100).into();
 
-                let duration: gst::ClockTime = (((f64::from(video_frame.frame_rate_D)
-                    / f64::from(video_frame.frame_rate_N))
-                    * 1_000_000_000.0) as u64)
-                    .into();
-                let buffer = buffer.get_mut().unwrap();
+            let duration: gst::ClockTime = (((f64::from(video_frame.frame_rate().1)
+                / f64::from(video_frame.frame_rate().0))
+                * 1_000_000_000.0) as u64)
+                .into();
+            let buffer = buffer.get_mut().unwrap();
 
-                if ndi_struct.start_pts == gst::ClockTime(Some(0)) {
-                    ndi_struct.start_pts =
+            // FIXME don't use static mut, also this calculation is wrong
+            unsafe {
+                if NDI_STRUCT.start_pts == gst::ClockTime(Some(0)) {
+                    NDI_STRUCT.start_pts =
                         element.get_clock().unwrap().get_time() - element.get_base_time();
                 }
 
-                buffer.set_pts(pts + ndi_struct.start_pts);
-                buffer.set_duration(duration);
-                buffer.set_offset(timestamp_data.offset);
-                timestamp_data.offset += 1;
-                buffer.set_offset_end(timestamp_data.offset);
-                buffer.copy_from_slice(0, data).unwrap();
+                buffer.set_pts(pts + NDI_STRUCT.start_pts);
             }
-
-            gst_log!(self.cat, obj: element, "Produced buffer {:?}", buffer);
-            NDIlib_recv_free_video_v2(pNDI_recv, &video_frame);
-
-            Ok(buffer)
+            buffer.set_duration(duration);
+            buffer.set_offset(timestamp_data.offset);
+            timestamp_data.offset += 1;
+            buffer.set_offset_end(timestamp_data.offset);
+            buffer.copy_from_slice(0, video_frame.data()).unwrap();
         }
+
+        gst_log!(self.cat, obj: element, "Produced buffer {:?}", buffer);
+
+        Ok(buffer)
     }
 }
 

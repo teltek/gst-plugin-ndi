@@ -1,5 +1,3 @@
-#![allow(non_camel_case_types, non_upper_case_globals, non_snake_case)]
-
 #[macro_use]
 extern crate glib;
 #[macro_use]
@@ -18,57 +16,59 @@ pub mod ndi;
 mod ndiaudiosrc;
 mod ndivideosrc;
 
-// use gst_plugin::base_src::*;
 use ndisys::*;
-use std::ffi::{CStr, CString};
+use ndi::*;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
-
-use gst::GstObjectExt;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
+    if !ndi::initialize() {
+        return Err(glib_bool_error!("Cannot initialize NDI"));
+    }
+
     ndivideosrc::register(plugin)?;
     ndiaudiosrc::register(plugin)?;
     Ok(())
 }
 
-struct ndi_receiver_info {
+struct ReceiverInfo {
+    id: usize,
     stream_name: String,
     ip: String,
     video: bool,
     audio: bool,
-    ndi_instance: NdiInstance,
+    ndi_instance: RecvInstance,
     initial_timestamp: u64,
-    id: i8,
 }
 
 struct Ndi {
     start_pts: gst::ClockTime,
 }
 
-static mut ndi_struct: Ndi = Ndi {
+static mut NDI_STRUCT: Ndi = Ndi {
     start_pts: gst::ClockTime(Some(0)),
 };
 
 lazy_static! {
-    static ref hashmap_receivers: Mutex<HashMap<i8, ndi_receiver_info>> = {
+    static ref HASHMAP_RECEIVERS: Mutex<HashMap<usize, ReceiverInfo>> = {
         let m = HashMap::new();
         Mutex::new(m)
     };
 }
 
-static mut id_receiver: i8 = 0;
+static ID_RECEIVER: AtomicUsize = AtomicUsize::new(0);
 
 fn connect_ndi(
     cat: gst::DebugCategory,
     element: &gst_base::BaseSrc,
     ip: &str,
     stream_name: &str,
-) -> i8 {
+) -> Option<usize> {
     gst_debug!(cat, obj: element, "Starting NDI connection...");
 
-    let mut receivers = hashmap_receivers.lock().unwrap();
+    let mut receivers = HASHMAP_RECEIVERS.lock().unwrap();
     let mut audio = false;
     let mut video = false;
 
@@ -92,143 +92,102 @@ fn connect_ndi(
                 } else {
                     val.audio = audio;
                 }
-                return val.id;
+                return Some(val.id);
             }
         }
     }
-    unsafe {
-        if !NDIlib_initialize() {
-            gst_element_error!(
-                element,
-                gst::CoreError::Negotiation,
-                ["Cannot run NDI: NDIlib_initialize error"]
-            );
-            return 0;
-        }
 
-        let NDI_find_create_desc: NDIlib_find_create_t = Default::default();
-        let pNDI_find = NDIlib_find_create_v2(&NDI_find_create_desc);
-        if pNDI_find.is_null() {
+    let mut find = match FindInstance::builder().build() {
+        None => {
             gst_element_error!(
                 element,
                 gst::CoreError::Negotiation,
                 ["Cannot run NDI: NDIlib_find_create_v2 error"]
             );
-            return 0;
-        }
+            return None;
+        },
+        Some(find) => find,
+    };
 
-        let mut total_sources: u32 = 0;
-        let p_sources;
+    // TODO Sleep 1s to wait for all sources
+    find.wait_for_sources(2000);
 
-        // TODO Sleep 1s to wait for all sources
-        NDIlib_find_wait_for_sources(pNDI_find, 2000);
-        p_sources = NDIlib_find_get_current_sources(pNDI_find, &mut total_sources as *mut u32);
+    let sources = find.get_current_sources();
 
-        // We need at least one source
-        if p_sources.is_null() {
-            gst_element_error!(
-                element,
-                gst::CoreError::Negotiation,
-                ["Error getting NDIlib_find_get_current_sources"]
-            );
-            return 0;
-        }
-
-        let mut no_source: isize = -1;
-        for i in 0..total_sources as isize {
-            if CStr::from_ptr((*p_sources.offset(i)).p_ndi_name)
-                .to_string_lossy()
-                .into_owned()
-                == stream_name
-                || CStr::from_ptr((*p_sources.offset(i)).p_ip_address)
-                    .to_string_lossy()
-                    .into_owned()
-                    == ip
-            {
-                no_source = i;
-                break;
-            }
-        }
-        if no_source == -1 {
-            gst_element_error!(element, gst::ResourceError::OpenRead, ["Stream not found"]);
-            return 0;
-        }
-
-        gst_debug!(
-            cat,
-            obj: element,
-            "Total sources in network {}: Connecting to NDI source with name '{}' and address '{}'",
-            total_sources,
-            CStr::from_ptr((*p_sources.offset(no_source)).p_ndi_name)
-                .to_string_lossy()
-                .into_owned(),
-            CStr::from_ptr((*p_sources.offset(no_source)).p_ip_address)
-                .to_string_lossy()
-                .into_owned()
+    // We need at least one source
+    if sources.is_empty() {
+        gst_element_error!(
+            element,
+            gst::CoreError::Negotiation,
+            ["Error getting NDIlib_find_get_current_sources"]
         );
+        return None;
+    }
 
-        let source = *p_sources.offset(no_source);
+    let source = sources.iter().find(|s| {
+        s.ndi_name() == stream_name || s.ip_address() == ip
+    });
 
-        let source_ip = CStr::from_ptr(source.p_ip_address)
-            .to_string_lossy()
-            .into_owned();
-        let source_name = CStr::from_ptr(source.p_ndi_name)
-            .to_string_lossy()
-            .into_owned();
+    let source = match source {
+        None => {
+            gst_element_error!(element, gst::ResourceError::OpenRead, ["Stream not found"]);
+            return None;
+        },
+        Some(source) => source,
+    };
 
-        let p_ndi_name = CString::new("Galicaster NDI Receiver").unwrap();
-        let NDI_recv_create_desc = NDIlib_recv_create_v3_t {
-            source_to_connect_to: source,
-            p_ndi_name: p_ndi_name.as_ptr(),
-            ..Default::default()
-        };
+    gst_debug!(
+        cat,
+        obj: element,
+        "Total sources in network {}: Connecting to NDI source with name '{}' and address '{}'",
+        sources.len(),
+        source.ndi_name(),
+        source.ip_address(),
+    );
 
-        let pNDI_recv = NDIlib_recv_create_v3(&NDI_recv_create_desc);
-        if pNDI_recv.is_null() {
+    let recv = RecvInstance::builder(&source, "Galicaster NDI Receiver")
+        .bandwidth(NDIlib_recv_bandwidth_e::NDIlib_recv_bandwidth_highest)
+        .color_format(NDIlib_recv_color_format_e::NDIlib_recv_color_format_UYVY_BGRA)
+        .allow_video_fields(true)
+        .build();
+    let recv = match recv {
+        None => {
             gst_element_error!(
                 element,
                 gst::CoreError::Negotiation,
                 ["Cannot run NDI: NDIlib_recv_create_v3 error"]
             );
-            return 0;
-        }
+            return None;
+        },
+        Some(recv) => recv,
+    };
 
-        NDIlib_find_destroy(pNDI_find);
+    recv.set_tally(&Tally::default());
 
-        let tally_state: NDIlib_tally_t = Default::default();
-        NDIlib_recv_set_tally(pNDI_recv, &tally_state);
+    let enable_hw_accel = MetadataFrame::new(0, Some("<ndi_hwaccel enabled=\"true\"/>"));
+    recv.send_metadata(&enable_hw_accel);
 
-        let data = CString::new("<ndi_hwaccel enabled=\"true\"/>").unwrap();
-        let enable_hw_accel = NDIlib_metadata_frame_t {
-            length: data.to_bytes().len() as i32,
-            timecode: 0,
-            p_data: data.as_ptr(),
-        };
+    let id_receiver = ID_RECEIVER.fetch_add(1, Ordering::SeqCst);
+    receivers.insert(
+        id_receiver,
+        ReceiverInfo {
+            stream_name: source.ndi_name().to_owned(),
+            ip: source.ip_address().to_owned(),
+            video,
+            audio,
+            ndi_instance: recv,
+            initial_timestamp: 0,
+            id: id_receiver,
+        },
+    );
 
-        NDIlib_recv_send_metadata(pNDI_recv, &enable_hw_accel);
-
-        id_receiver += 1;
-        receivers.insert(
-            id_receiver,
-            ndi_receiver_info {
-                stream_name: source_name.clone(),
-                ip: source_ip.clone(),
-                video,
-                audio,
-                ndi_instance: NdiInstance { recv: pNDI_recv },
-                initial_timestamp: 0,
-                id: id_receiver,
-            },
-        );
-
-        gst_debug!(cat, obj: element, "Started NDI connection");
-        id_receiver
-    }
+    gst_debug!(cat, obj: element, "Started NDI connection");
+    Some(id_receiver)
 }
 
-fn stop_ndi(cat: gst::DebugCategory, element: &gst_base::BaseSrc, id: i8) -> bool {
+fn stop_ndi(cat: gst::DebugCategory, element: &gst_base::BaseSrc, id: usize) -> bool {
     gst_debug!(cat, obj: element, "Closing NDI connection...");
-    let mut receivers = hashmap_receivers.lock().unwrap();
+    let mut receivers = HASHMAP_RECEIVERS.lock().unwrap();
     {
         let val = receivers.get_mut(&id).unwrap();
         if val.video && val.audio {
@@ -238,14 +197,6 @@ fn stop_ndi(cat: gst::DebugCategory, element: &gst_base::BaseSrc, id: i8) -> boo
                 val.video = false;
             }
             return true;
-        }
-
-        let recv = &val.ndi_instance;
-        let pNDI_recv = recv.recv;
-        unsafe {
-            NDIlib_recv_destroy(pNDI_recv);
-            // ndi_struct.recv = None;
-            NDIlib_destroy();
         }
     }
     receivers.remove(&id);

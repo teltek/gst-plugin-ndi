@@ -7,6 +7,7 @@ pub fn initialize() -> bool {
     unsafe { NDIlib_initialize() }
 }
 
+#[derive(Debug)]
 pub struct FindBuilder<'a> {
     show_local_sources: bool,
     groups: Option<&'a str>,
@@ -67,6 +68,7 @@ impl<'a> FindBuilder<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct FindInstance(ptr::NonNull<::std::os::raw::c_void>);
 unsafe impl Send for FindInstance {}
 
@@ -111,6 +113,7 @@ impl Drop for FindInstance {
     }
 }
 
+#[derive(Debug)]
 pub struct Source<'a>(ptr::NonNull<NDIlib_source_t>, &'a FindInstance);
 
 unsafe impl<'a> Send for Source<'a> {}
@@ -135,6 +138,7 @@ impl<'a> Source<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct RecvBuilder<'a> {
     source_to_connect_to: &'a Source<'a>,
     allow_video_fields: bool,
@@ -185,6 +189,7 @@ impl<'a> RecvBuilder<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct RecvInstance(ptr::NonNull<::std::os::raw::c_void>);
 unsafe impl Send for RecvInstance {}
 
@@ -207,7 +212,7 @@ impl RecvInstance {
         unsafe { NDIlib_recv_send_metadata(self.0.as_ptr(), metadata.as_ptr()) }
     }
 
-    pub fn recv_capture(
+    pub fn capture(
         &self,
         video: bool,
         audio: bool,
@@ -268,6 +273,7 @@ impl Drop for RecvInstance {
     }
 }
 
+#[derive(Debug)]
 pub struct Tally(NDIlib_tally_t);
 unsafe impl Send for Tally {}
 
@@ -297,12 +303,14 @@ impl Tally {
     }
 }
 
+#[derive(Debug)]
 pub enum Frame<'a> {
     Video(VideoFrame<'a>),
     Audio(AudioFrame<'a>),
     Metadata(MetadataFrame<'a>),
 }
 
+#[derive(Debug)]
 pub enum VideoFrame<'a> {
     //Owned(NDIlib_video_frame_v2_t, Option<ffi::CString>, Option<Vec<u8>>),
     Borrowed(NDIlib_video_frame_v2_t, &'a RecvInstance),
@@ -407,6 +415,7 @@ impl<'a> Drop for VideoFrame<'a> {
     }
 }
 
+#[derive(Debug)]
 pub enum AudioFrame<'a> {
     //Owned(NDIlib_audio_frame_v2_t, Option<ffi::CString>, Option<Vec<u8>>),
     Borrowed(NDIlib_audio_frame_v2_t, &'a RecvInstance),
@@ -484,7 +493,7 @@ impl<'a> AudioFrame<'a> {
     pub fn copy_to_interleaved_16s(&self, data: &mut [i16]) {
         assert_eq!(
             data.len(),
-            (self.no_samples() * self.no_channels() * 2) as usize
+            (self.no_samples() * self.no_channels()) as usize
         );
 
         let mut dst = NDIlib_audio_frame_interleaved_16s_t {
@@ -513,6 +522,7 @@ impl<'a> Drop for AudioFrame<'a> {
     }
 }
 
+#[derive(Debug)]
 pub enum MetadataFrame<'a> {
     Owned(NDIlib_metadata_frame_t, Option<ffi::CString>),
     Borrowed(NDIlib_metadata_frame_t, &'a RecvInstance),
