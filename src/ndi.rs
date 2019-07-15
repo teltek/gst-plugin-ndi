@@ -280,7 +280,7 @@ unsafe impl Send for Tally {}
 impl Default for Tally {
     fn default() -> Self {
         Self(NDIlib_tally_t {
-            on_program: false,
+            on_program: true,
             on_preview: false,
         })
     }
