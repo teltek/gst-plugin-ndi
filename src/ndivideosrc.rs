@@ -375,8 +375,18 @@ impl BaseSrcImpl for NdiVideoSrc {
         gst_log!(
             self.cat,
             obj: element,
-            "NDI video frame received: {:?}",
-            video_frame
+            "NDI video frame received: {:?} with timecode {} and timestamp {}",
+            video_frame,
+            if video_frame.timecode() == ndisys::NDIlib_send_timecode_synthesize {
+                gst::CLOCK_TIME_NONE
+            } else {
+                gst::ClockTime::from(video_frame.timecode() as u64 * 100)
+            },
+            if video_frame.timestamp() == ndisys::NDIlib_recv_timestamp_undefined {
+                gst::CLOCK_TIME_NONE
+            } else {
+                gst::ClockTime::from(video_frame.timestamp() as u64 * 100)
+            },
         );
 
         // YV12 and I420 are swapped in the NDI SDK compared to GStreamer

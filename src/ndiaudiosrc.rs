@@ -15,6 +15,7 @@ use std::{i32, u32};
 use connect_ndi;
 use stop_ndi;
 use ndi::*;
+use ndisys;
 
 use HASHMAP_RECEIVERS;
 
@@ -358,8 +359,18 @@ impl BaseSrcImpl for NdiAudioSrc {
         gst_log!(
             self.cat,
             obj: element,
-            "NDI audio frame received: {:?}",
-            audio_frame
+            "NDI audio frame received: {:?} with timecode {} and timestamp {}",
+            audio_frame,
+            if audio_frame.timecode() == ndisys::NDIlib_send_timecode_synthesize {
+                gst::CLOCK_TIME_NONE
+            } else {
+                gst::ClockTime::from(audio_frame.timecode() as u64 * 100)
+            },
+            if audio_frame.timestamp() == ndisys::NDIlib_recv_timestamp_undefined {
+                gst::CLOCK_TIME_NONE
+            } else {
+                gst::ClockTime::from(audio_frame.timestamp() as u64 * 100)
+            },
         );
 
         let info = gst_audio::AudioInfo::new(
