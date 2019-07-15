@@ -132,7 +132,6 @@ impl ObjectSubclass for NdiAudioSrc {
                 ("rate", &gst::IntRange::<i32>::new(1, i32::MAX)),
                 ("channels", &gst::IntRange::<i32>::new(1, i32::MAX)),
                 ("layout", &"interleaved"),
-                ("channel-mask", &gst::Bitmask::new(0)),
             ],
         );
 
@@ -235,30 +234,6 @@ impl ElementImpl for NdiAudioSrc {
 }
 
 impl BaseSrcImpl for NdiAudioSrc {
-    fn set_caps(
-        &self,
-        element: &gst_base::BaseSrc,
-        caps: &gst::Caps,
-    ) -> Result<(), gst::LoggableError> {
-        let info = match gst_audio::AudioInfo::from_caps(caps) {
-            None => {
-                return Err(gst_loggable_error!(
-                    self.cat,
-                    "Failed to build `AudioInfo` from caps {}",
-                    caps
-                ));
-            }
-            Some(info) => info,
-        };
-
-        gst_debug!(self.cat, obj: element, "Configuring for caps {}", caps);
-
-        let mut state = self.state.lock().unwrap();
-        state.info = Some(info);
-
-        Ok(())
-    }
-
     fn start(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
         *self.state.lock().unwrap() = Default::default();
 
@@ -305,39 +280,12 @@ impl BaseSrcImpl for NdiAudioSrc {
     }
 
     fn fixate(&self, element: &gst_base::BaseSrc, caps: gst::Caps) -> gst::Caps {
-        let receivers = HASHMAP_RECEIVERS.lock().unwrap();
-        let state = self.state.lock().unwrap();
-
-        let receiver = receivers.get(&state.id_receiver.unwrap()).unwrap();
-
-        let recv = &receiver.ndi_instance;
-
-        // FIXME: Should be done in create() and caps be updated as needed
-
-        let audio_frame =
-        loop {
-            match recv.capture(false, true, false, 1000) {
-                Err(_) => unimplemented!(),
-                Ok(None) => continue,
-                Ok(Some(Frame::Audio(frame))) => break frame,
-                _ => unreachable!(),
-            }
-        };
-
         let mut caps = gst::Caps::truncate(caps);
         {
             let caps = caps.make_mut();
             let s = caps.get_mut_structure(0).unwrap();
-            s.fixate_field_nearest_int("rate", audio_frame.sample_rate());
-            s.fixate_field_nearest_int("channels", audio_frame.no_channels());
-            s.fixate_field_str("layout", "interleaved");
-            s.set_value(
-                "channel-mask",
-                gst::Bitmask::new(gst_audio::AudioChannelPosition::get_fallback_mask(
-                    audio_frame.no_channels() as u32,
-                ))
-                .to_send_value(),
-            );
+            s.fixate_field_nearest_int("rate", 48_000);
+            s.fixate_field_nearest_int("channels", 2);
         }
 
         self.parent_fixate(element, caps)
@@ -351,14 +299,7 @@ impl BaseSrcImpl for NdiAudioSrc {
     ) -> Result<gst::Buffer, gst::FlowError> {
         // FIXME: Make sure to not have any mutexes locked while wait
         let settings = self.settings.lock().unwrap().clone();
-        let state = self.state.lock().unwrap();
-        let _info = match state.info {
-            None => {
-                gst_element_error!(element, gst::CoreError::Negotiation, ["Have no caps yet"]);
-                return Err(gst::FlowError::NotNegotiated);
-            }
-            Some(ref info) => info.clone(),
-        };
+        let mut state = self.state.lock().unwrap();
         let receivers = HASHMAP_RECEIVERS.lock().unwrap();
 
         let receiver = &receivers.get(&state.id_receiver.unwrap()).unwrap();
@@ -420,6 +361,21 @@ impl BaseSrcImpl for NdiAudioSrc {
             "NDI audio frame received: {:?}",
             audio_frame
         );
+
+        let info = gst_audio::AudioInfo::new(
+                gst_audio::AUDIO_FORMAT_S16,
+                audio_frame.sample_rate() as u32,
+                audio_frame.no_channels() as u32,
+            )
+            .build()
+            .unwrap();
+
+        if state.info.as_ref() != Some(&info) {
+            let caps = info.to_caps().unwrap();
+            state.info = Some(info);
+            gst_debug!(self.cat, obj: element, "Configuring for caps {}", caps);
+            element.set_caps(&caps).map_err(|_| gst::FlowError::NotNegotiated)?;
+        }
 
         gst_log!(
             self.cat,

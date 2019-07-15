@@ -8,13 +8,13 @@ use gst_base;
 use gst_base::prelude::*;
 use gst_base::subclass::prelude::*;
 
-use gst::Fraction;
 use gst_video;
 
 use std::sync::Mutex;
 use std::{i32, u32};
 
 use ndi::*;
+use ndisys;
 
 use connect_ndi;
 use stop_ndi;
@@ -243,28 +243,6 @@ impl ElementImpl for NdiVideoSrc {
 }
 
 impl BaseSrcImpl for NdiVideoSrc {
-    fn set_caps(
-        &self,
-        element: &gst_base::BaseSrc,
-        caps: &gst::Caps,
-    ) -> Result<(), gst::LoggableError> {
-        let info = match gst_video::VideoInfo::from_caps(caps) {
-            None => {
-                return Err(gst_loggable_error!(
-                    self.cat,
-                    "Failed to build `VideoInfo` from caps {}",
-                    caps
-                ));
-            }
-            Some(info) => info,
-        };
-        gst_debug!(self.cat, obj: element, "Configuring for caps {}", caps);
-
-        let mut state = self.state.lock().unwrap();
-        state.info = Some(info);
-        Ok(())
-    }
-
     fn start(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
         *self.state.lock().unwrap() = Default::default();
         let mut state = self.state.lock().unwrap();
@@ -311,34 +289,17 @@ impl BaseSrcImpl for NdiVideoSrc {
     }
 
     fn fixate(&self, element: &gst_base::BaseSrc, caps: gst::Caps) -> gst::Caps {
-        let receivers = HASHMAP_RECEIVERS.lock().unwrap();
-        let state = self.state.lock().unwrap();
-
-        let receiver = receivers.get(&state.id_receiver.unwrap()).unwrap();
-        let recv = &receiver.ndi_instance;
-
-        // FIXME: Should be done in create() and caps be updated as needed
-        let video_frame =
-        loop {
-            match recv.capture(true, false, false, 1000) {
-                Err(_) => unimplemented!(),
-                Ok(None) => continue,
-                Ok(Some(Frame::Video(frame))) => break frame,
-                _ => unreachable!(),
-            }
-        };
-
         let mut caps = gst::Caps::truncate(caps);
         {
             let caps = caps.make_mut();
             let s = caps.get_mut_structure(0).unwrap();
-            s.fixate_field_nearest_int("width", video_frame.xres());
-            s.fixate_field_nearest_int("height", video_frame.yres());
-            s.fixate_field_nearest_fraction(
-                "framerate",
-                Fraction::new(video_frame.frame_rate().0, video_frame.frame_rate().1),
-            );
+            s.fixate_field_nearest_int("width", 1920);
+            s.fixate_field_nearest_int("height", 1080);
+            if s.has_field("pixel-aspect-ratio") {
+                s.fixate_field_nearest_fraction("pixel-aspect-ratio", gst::Fraction::new(1, 1));
+            }
         }
+
         self.parent_fixate(element, caps)
     }
 
@@ -351,14 +312,7 @@ impl BaseSrcImpl for NdiVideoSrc {
     ) -> Result<gst::Buffer, gst::FlowError> {
         // FIXME: Make sure to not have any mutexes locked while wait
         let settings = self.settings.lock().unwrap().clone();
-        let state = self.state.lock().unwrap();
-        let _info = match state.info {
-            None => {
-                gst_element_error!(element, gst::CoreError::Negotiation, ["Have no caps yet"]);
-                return Err(gst::FlowError::NotNegotiated);
-            }
-            Some(ref info) => info.clone(),
-        };
+        let mut state = self.state.lock().unwrap();
         let receivers = HASHMAP_RECEIVERS.lock().unwrap();
 
         let receiver = &receivers.get(&state.id_receiver.unwrap()).unwrap();
@@ -421,6 +375,32 @@ impl BaseSrcImpl for NdiVideoSrc {
             video_frame
         );
 
+        let par = gst::Fraction::approximate_f32(video_frame.picture_aspect_ratio()).unwrap() *
+            gst::Fraction::new(video_frame.yres(), video_frame.xres());
+
+        let info = gst_video::VideoInfo::new(
+                gst_video::VideoFormat::Uyvy,
+                video_frame.xres() as u32,
+                video_frame.yres() as u32,
+            )
+            .fps(gst::Fraction::from(video_frame.frame_rate()))
+            .par(par)
+            .interlace_mode(if video_frame.frame_format_type() == ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_progressive {
+                    gst_video::VideoInterlaceMode::Progressive
+                } else {
+                    gst_video::VideoInterlaceMode::Interleaved
+                }
+            )
+            .build()
+            .unwrap();
+
+        if state.info.as_ref() != Some(&info) {
+            let caps = info.to_caps().unwrap();
+            state.info = Some(info);
+            gst_debug!(self.cat, obj: element, "Configuring for caps {}", caps);
+            element.set_caps(&caps).map_err(|_| gst::FlowError::NotNegotiated)?;
+        }
+
         gst_log!(
             self.cat,
             obj: element,
@@ -435,6 +415,8 @@ impl BaseSrcImpl for NdiVideoSrc {
             let buffer = buffer.get_mut().unwrap();
             buffer.set_pts(pts);
             buffer.set_duration(duration);
+
+            // FIXME: This assumes that the strides match up
             buffer.copy_from_slice(0, video_frame.data()).unwrap();
         }
 

@@ -130,7 +130,7 @@ fn connect_ndi(
     let recv = RecvInstance::builder(&source, "Galicaster NDI Receiver")
         .bandwidth(NDIlib_recv_bandwidth_e::NDIlib_recv_bandwidth_highest)
         .color_format(NDIlib_recv_color_format_e::NDIlib_recv_color_format_UYVY_BGRA)
-        .allow_video_fields(true)
+        .allow_video_fields(false)
         .build();
     let recv = match recv {
         None => {
