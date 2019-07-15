@@ -41,16 +41,7 @@ struct ReceiverInfo {
     video: bool,
     audio: bool,
     ndi_instance: RecvInstance,
-    initial_timestamp: u64,
 }
-
-struct Ndi {
-    start_pts: gst::ClockTime,
-}
-
-static mut NDI_STRUCT: Ndi = Ndi {
-    start_pts: gst::ClockTime(Some(0)),
-};
 
 lazy_static! {
     static ref HASHMAP_RECEIVERS: Mutex<HashMap<usize, ReceiverInfo>> = {
@@ -167,7 +158,6 @@ fn connect_ndi(
             video,
             audio: !video,
             ndi_instance: recv,
-            initial_timestamp: 0,
             id: id_receiver,
         },
     );

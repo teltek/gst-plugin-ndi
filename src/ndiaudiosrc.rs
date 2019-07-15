@@ -16,7 +16,6 @@ use connect_ndi;
 use stop_ndi;
 use ndi::*;
 
-use NDI_STRUCT;
 use HASHMAP_RECEIVERS;
 
 use byte_slice_cast::AsMutSliceOf;
@@ -86,15 +85,10 @@ impl Default for State {
     }
 }
 
-struct TimestampData {
-    offset: u64,
-}
-
 pub(crate) struct NdiAudioSrc {
     cat: gst::DebugCategory,
     settings: Mutex<Settings>,
     state: Mutex<State>,
-    timestamp_data: Mutex<TimestampData>,
 }
 
 impl ObjectSubclass for NdiAudioSrc {
@@ -114,7 +108,6 @@ impl ObjectSubclass for NdiAudioSrc {
             ),
             settings: Mutex::new(Default::default()),
             state: Mutex::new(Default::default()),
-            timestamp_data: Mutex::new(TimestampData { offset: 0 }),
         }
     }
 
@@ -241,52 +234,6 @@ impl ObjectImpl for NdiAudioSrc {
 }
 
 impl ElementImpl for NdiAudioSrc {
-    fn change_state(
-        &self,
-        element: &gst::Element,
-        transition: gst::StateChange,
-    ) -> Result<gst::StateChangeSuccess, gst::StateChangeError> {
-        if transition == gst::StateChange::PausedToPlaying {
-            let mut receivers = HASHMAP_RECEIVERS.lock().unwrap();
-            let state = self.state.lock().unwrap();
-
-            let receiver = receivers.get_mut(&state.id_receiver.unwrap()).unwrap();
-            let recv = &receiver.ndi_instance;
-
-            // FIXME error handling, make interruptable
-            let audio_frame =
-            loop {
-                match recv.capture(false, true, false, 1000) {
-                    Err(_) => unimplemented!(),
-                    Ok(None) => continue,
-                    Ok(Some(Frame::Audio(frame))) => break frame,
-                    _ => unreachable!(),
-                }
-            };
-
-            gst_debug!(
-                self.cat,
-                obj: element,
-                "NDI audio frame received: {:?}",
-                audio_frame
-            );
-
-            // FIXME handle unset timestamp
-            if receiver.initial_timestamp <= audio_frame.timestamp() as u64
-                || receiver.initial_timestamp == 0
-            {
-                receiver.initial_timestamp = audio_frame.timestamp() as u64;
-            }
-
-            gst_debug!(
-                self.cat,
-                obj: element,
-                "Setting initial timestamp to {}",
-                receiver.initial_timestamp
-            );
-        }
-        self.parent_change_state(element, transition)
-    }
 }
 
 impl BaseSrcImpl for NdiAudioSrc {
@@ -420,10 +367,8 @@ impl BaseSrcImpl for NdiAudioSrc {
         _offset: u64,
         _length: u32,
     ) -> Result<gst::Buffer, gst::FlowError> {
+        // FIXME: Make sure to not have any mutexes locked while wait
         let settings = self.settings.lock().unwrap().clone();
-
-        let mut timestamp_data = self.timestamp_data.lock().unwrap();
-
         let state = self.state.lock().unwrap();
         let _info = match state.info {
             None => {
@@ -437,7 +382,7 @@ impl BaseSrcImpl for NdiAudioSrc {
         let receiver = &receivers.get(&state.id_receiver.unwrap()).unwrap();
         let recv = &receiver.ndi_instance;
 
-        let time = receiver.initial_timestamp;
+        let clock = element.get_clock().unwrap();
 
         let mut count_frame_none = 0;
         let audio_frame =
@@ -478,12 +423,14 @@ impl BaseSrcImpl for NdiAudioSrc {
                 Ok(Some(frame)) => frame,
             };
 
-            if time >= (audio_frame.timestamp() as u64) {
-                gst_debug!(self.cat, obj: element, "Frame timestamp ({:?}) is lower than received in the first frame from NDI ({:?}), so skiping...", (audio_frame.timestamp() as u64), time);
-            } else {
-                break audio_frame;
-            }
+            break audio_frame;
         };
+
+        // For now take the current running time as PTS. At a later time we
+        // will want to work with the timestamp given by the NDI SDK if available
+        let now = clock.get_time();
+        let base_time = element.get_base_time();
+        let pts = now - base_time;
 
         gst_log!(
             self.cat,
@@ -491,8 +438,6 @@ impl BaseSrcImpl for NdiAudioSrc {
             "NDI audio frame received: {:?}",
             audio_frame
         );
-
-        let pts = audio_frame.timestamp() as u64 - time;
 
         gst_log!(
             self.cat,
@@ -505,29 +450,11 @@ impl BaseSrcImpl for NdiAudioSrc {
         let buff_size = (audio_frame.no_samples() * 2 * audio_frame.no_channels()) as usize;
         let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
         {
-            // FIXME don't use static mut, also this calculation is wrong
-            unsafe {
-                if NDI_STRUCT.start_pts == gst::ClockTime(Some(0)) {
-                    NDI_STRUCT.start_pts =
-                        element.get_clock().unwrap().get_time() - element.get_base_time();
-                }
-            }
-
+            let duration = gst::SECOND.mul_div_floor(audio_frame.no_samples() as u64, audio_frame.sample_rate() as u64).unwrap_or(gst::CLOCK_TIME_NONE);
             let buffer = buffer.get_mut().unwrap();
 
-            // Newtek NDI yields times in 100ns intervals since the Unix Time
-            let pts: gst::ClockTime = (pts * 100).into();
-            buffer.set_pts(pts + unsafe { NDI_STRUCT.start_pts });
-
-            let duration: gst::ClockTime = (((f64::from(audio_frame.no_samples())
-                / f64::from(audio_frame.sample_rate()))
-                * 1_000_000_000.0) as u64)
-                .into();
+            buffer.set_pts(pts);
             buffer.set_duration(duration);
-
-            buffer.set_offset(timestamp_data.offset);
-            timestamp_data.offset += audio_frame.no_samples() as u64;
-            buffer.set_offset_end(timestamp_data.offset);
 
             audio_frame.copy_to_interleaved_16s(buffer
                 .map_writable()
