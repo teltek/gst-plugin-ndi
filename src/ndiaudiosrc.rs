@@ -72,7 +72,6 @@ static PROPERTIES: [subclass::Property; 3] = [
 struct State {
     info: Option<gst_audio::AudioInfo>,
     id_receiver: Option<usize>,
-    latency: Option<gst::ClockTime>,
 }
 
 impl Default for State {
@@ -80,7 +79,6 @@ impl Default for State {
         State {
             info: None,
             id_receiver: None,
-            latency: None,
         }
     }
 }
@@ -295,29 +293,20 @@ impl BaseSrcImpl for NdiAudioSrc {
 
     fn query(&self, element: &gst_base::BaseSrc, query: &mut gst::QueryRef) -> bool {
         use gst::QueryView;
-        if let QueryView::Scheduling(ref mut q) = query.view_mut() {
-            q.set(gst::SchedulingFlags::SEQUENTIAL, 1, -1, 0);
-            q.add_scheduling_modes(&[gst::PadMode::Push]);
-            return true;
-        }
-        if let QueryView::Latency(ref mut q) = query.view_mut() {
-            let state = self.state.lock().unwrap();
 
-            if let Some(ref _info) = state.info {
-                let latency = state.latency.unwrap();
-                gst_debug!(self.cat, obj: element, "Returning latency {}", latency);
-                q.set(true, latency, gst::CLOCK_TIME_NONE);
-                return true;
-            } else {
-                return false;
+        match query.view_mut() {
+            QueryView::Scheduling(ref mut q) => {
+                q.set(gst::SchedulingFlags::SEQUENTIAL, 1, -1, 0);
+                q.add_scheduling_modes(&[gst::PadMode::Push]);
+                true
             }
+            _ => BaseSrcImplExt::parent_query(self, element, query),
         }
-        BaseSrcImplExt::parent_query(self, element, query)
     }
 
     fn fixate(&self, element: &gst_base::BaseSrc, caps: gst::Caps) -> gst::Caps {
         let receivers = HASHMAP_RECEIVERS.lock().unwrap();
-        let mut state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap();
 
         let receiver = receivers.get(&state.id_receiver.unwrap()).unwrap();
 
@@ -335,16 +324,11 @@ impl BaseSrcImpl for NdiAudioSrc {
             }
         };
 
-        // FIXME: Why?
-        let no_samples = audio_frame.no_samples() as u64;
-        let audio_rate = audio_frame.sample_rate();
-        state.latency = gst::SECOND.mul_div_floor(no_samples, audio_rate as u64);
-
         let mut caps = gst::Caps::truncate(caps);
         {
             let caps = caps.make_mut();
             let s = caps.get_mut_structure(0).unwrap();
-            s.fixate_field_nearest_int("rate", audio_rate);
+            s.fixate_field_nearest_int("rate", audio_frame.sample_rate());
             s.fixate_field_nearest_int("channels", audio_frame.no_channels());
             s.fixate_field_str("layout", "interleaved");
             s.set_value(
@@ -355,8 +339,6 @@ impl BaseSrcImpl for NdiAudioSrc {
                 .to_send_value(),
             );
         }
-
-        let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
 
         self.parent_fixate(element, caps)
     }

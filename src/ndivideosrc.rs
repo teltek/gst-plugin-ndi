@@ -73,7 +73,6 @@ static PROPERTIES: [subclass::Property; 3] = [
 struct State {
     info: Option<gst_video::VideoInfo>,
     id_receiver: Option<usize>,
-    latency: Option<gst::ClockTime>,
 }
 
 impl Default for State {
@@ -81,7 +80,6 @@ impl Default for State {
         State {
             info: None,
             id_receiver: None,
-            latency: None,
         }
     }
 }
@@ -264,7 +262,6 @@ impl BaseSrcImpl for NdiVideoSrc {
 
         let mut state = self.state.lock().unwrap();
         state.info = Some(info);
-        let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
         Ok(())
     }
 
@@ -302,29 +299,20 @@ impl BaseSrcImpl for NdiVideoSrc {
 
     fn query(&self, element: &gst_base::BaseSrc, query: &mut gst::QueryRef) -> bool {
         use gst::QueryView;
-        if let QueryView::Scheduling(ref mut q) = query.view_mut() {
-            q.set(gst::SchedulingFlags::SEQUENTIAL, 1, -1, 0);
-            q.add_scheduling_modes(&[gst::PadMode::Push]);
-            return true;
-        }
-        if let QueryView::Latency(ref mut q) = query.view_mut() {
-            let state = self.state.lock().unwrap();
 
-            if let Some(ref _info) = state.info {
-                let latency = state.latency.unwrap();
-                gst_debug!(self.cat, obj: element, "Returning latency {}", latency);
-                q.set(true, latency, gst::CLOCK_TIME_NONE);
-                return true;
-            } else {
-                return false;
+        match query.view_mut() {
+            QueryView::Scheduling(ref mut q) => {
+                q.set(gst::SchedulingFlags::SEQUENTIAL, 1, -1, 0);
+                q.add_scheduling_modes(&[gst::PadMode::Push]);
+                true
             }
+            _ => BaseSrcImplExt::parent_query(self, element, query),
         }
-        BaseSrcImplExt::parent_query(self, element, query)
     }
 
     fn fixate(&self, element: &gst_base::BaseSrc, caps: gst::Caps) -> gst::Caps {
         let receivers = HASHMAP_RECEIVERS.lock().unwrap();
-        let mut state = self.state.lock().unwrap();
+        let state = self.state.lock().unwrap();
 
         let receiver = receivers.get(&state.id_receiver.unwrap()).unwrap();
         let recv = &receiver.ndi_instance;
@@ -340,12 +328,6 @@ impl BaseSrcImpl for NdiVideoSrc {
             }
         };
 
-        // FIXME: Why?
-        state.latency = gst::SECOND.mul_div_floor(
-            video_frame.frame_rate().1 as u64,
-            video_frame.frame_rate().0 as u64,
-        );
-
         let mut caps = gst::Caps::truncate(caps);
         {
             let caps = caps.make_mut();
@@ -357,7 +339,6 @@ impl BaseSrcImpl for NdiVideoSrc {
                 Fraction::new(video_frame.frame_rate().0, video_frame.frame_rate().1),
             );
         }
-        let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
         self.parent_fixate(element, caps)
     }
 
