@@ -123,12 +123,7 @@ impl ObjectSubclass for NdiAudioSrc {
             &[
                 (
                     "format",
-                    &gst::List::new(&[
-                        //TODO add more formats?
-                        //&gst_audio::AUDIO_FORMAT_F32.to_string(),
-                        //&gst_audio::AUDIO_FORMAT_F64.to_string(),
-                        &gst_audio::AUDIO_FORMAT_S16.to_string(),
-                    ]),
+                    &gst::List::new(&[&gst_audio::AUDIO_FORMAT_S16.to_string()]),
                 ),
                 ("rate", &gst::IntRange::<i32>::new(1, i32::MAX)),
                 ("channels", &gst::IntRange::<i32>::new(1, i32::MAX)),
