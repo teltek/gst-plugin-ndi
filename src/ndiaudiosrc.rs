@@ -26,9 +26,6 @@ struct Settings {
     stream_name: String,
     ip: String,
     loss_threshold: u32,
-    // FIXME: Should be in State
-    id_receiver: Option<usize>,
-    latency: Option<gst::ClockTime>,
 }
 
 impl Default for Settings {
@@ -37,8 +34,6 @@ impl Default for Settings {
             stream_name: String::from("Fixed ndi stream name"),
             ip: String::from(""),
             loss_threshold: 5,
-            id_receiver: None,
-            latency: None,
         }
     }
 }
@@ -77,11 +72,17 @@ static PROPERTIES: [subclass::Property; 3] = [
 
 struct State {
     info: Option<gst_audio::AudioInfo>,
+    id_receiver: Option<usize>,
+    latency: Option<gst::ClockTime>,
 }
 
 impl Default for State {
     fn default() -> State {
-        State { info: None }
+        State {
+            info: None,
+            id_receiver: None,
+            latency: None,
+        }
     }
 }
 
@@ -247,9 +248,9 @@ impl ElementImpl for NdiAudioSrc {
     ) -> Result<gst::StateChangeSuccess, gst::StateChangeError> {
         if transition == gst::StateChange::PausedToPlaying {
             let mut receivers = HASHMAP_RECEIVERS.lock().unwrap();
-            let settings = self.settings.lock().unwrap();
+            let state = self.state.lock().unwrap();
 
-            let receiver = receivers.get_mut(&settings.id_receiver.unwrap()).unwrap();
+            let receiver = receivers.get_mut(&state.id_receiver.unwrap()).unwrap();
             let recv = &receiver.ndi_instance;
 
             // FIXME error handling, make interruptable
@@ -316,15 +317,16 @@ impl BaseSrcImpl for NdiAudioSrc {
     fn start(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
         *self.state.lock().unwrap() = Default::default();
 
-        let mut settings = self.settings.lock().unwrap();
-        settings.id_receiver = connect_ndi(
+        let settings = self.settings.lock().unwrap().clone();
+        let mut state = self.state.lock().unwrap();
+        state.id_receiver = connect_ndi(
             self.cat,
             element,
             &settings.ip.clone(),
             &settings.stream_name.clone(),
         );
 
-        match settings.id_receiver {
+        match state.id_receiver {
             None => Err(gst_error_msg!(
                 gst::ResourceError::NotFound,
                 ["Could not connect to this source"]
@@ -336,10 +338,11 @@ impl BaseSrcImpl for NdiAudioSrc {
     fn stop(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
         *self.state.lock().unwrap() = Default::default();
 
-        let settings = self.settings.lock().unwrap();
-        stop_ndi(self.cat, element, settings.id_receiver.unwrap());
-        // Commented because when adding ndi destroy stopped in this line
-        //*self.state.lock().unwrap() = Default::default();
+        let mut state = self.state.lock().unwrap();
+        if let Some(id_receiver) = state.id_receiver.take() {
+            stop_ndi(self.cat, element, id_receiver);
+        }
+        *state = State::default();
         Ok(())
     }
 
@@ -351,11 +354,10 @@ impl BaseSrcImpl for NdiAudioSrc {
             return true;
         }
         if let QueryView::Latency(ref mut q) = query.view_mut() {
-            let settings = &*self.settings.lock().unwrap();
             let state = self.state.lock().unwrap();
 
             if let Some(ref _info) = state.info {
-                let latency = settings.latency.unwrap();
+                let latency = state.latency.unwrap();
                 gst_debug!(self.cat, obj: element, "Returning latency {}", latency);
                 q.set(true, latency, gst::CLOCK_TIME_NONE);
                 return true;
@@ -368,9 +370,9 @@ impl BaseSrcImpl for NdiAudioSrc {
 
     fn fixate(&self, element: &gst_base::BaseSrc, caps: gst::Caps) -> gst::Caps {
         let receivers = HASHMAP_RECEIVERS.lock().unwrap();
-        let mut settings = self.settings.lock().unwrap();
+        let mut state = self.state.lock().unwrap();
 
-        let receiver = receivers.get(&settings.id_receiver.unwrap()).unwrap();
+        let receiver = receivers.get(&state.id_receiver.unwrap()).unwrap();
 
         let recv = &receiver.ndi_instance;
 
@@ -389,7 +391,7 @@ impl BaseSrcImpl for NdiAudioSrc {
         // FIXME: Why?
         let no_samples = audio_frame.no_samples() as u64;
         let audio_rate = audio_frame.sample_rate();
-        settings.latency = gst::SECOND.mul_div_floor(no_samples, audio_rate as u64);
+        state.latency = gst::SECOND.mul_div_floor(no_samples, audio_rate as u64);
 
         let mut caps = gst::Caps::truncate(caps);
         {
@@ -418,7 +420,7 @@ impl BaseSrcImpl for NdiAudioSrc {
         _offset: u64,
         _length: u32,
     ) -> Result<gst::Buffer, gst::FlowError> {
-        let _settings = &*self.settings.lock().unwrap();
+        let settings = self.settings.lock().unwrap().clone();
 
         let mut timestamp_data = self.timestamp_data.lock().unwrap();
 
@@ -432,7 +434,7 @@ impl BaseSrcImpl for NdiAudioSrc {
         };
         let receivers = HASHMAP_RECEIVERS.lock().unwrap();
 
-        let receiver = &receivers.get(&_settings.id_receiver.unwrap()).unwrap();
+        let receiver = &receivers.get(&state.id_receiver.unwrap()).unwrap();
         let recv = &receiver.ndi_instance;
 
         let time = receiver.initial_timestamp;
@@ -456,8 +458,8 @@ impl BaseSrcImpl for NdiAudioSrc {
                     gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type error received, assuming that the source closed the stream...."]);
                     return Err(gst::FlowError::Error);
                 },
-                Ok(None) if _settings.loss_threshold != 0 => {
-                    if count_frame_none < _settings.loss_threshold {
+                Ok(None) if settings.loss_threshold != 0 => {
+                    if count_frame_none < settings.loss_threshold {
                         count_frame_none += 1;
                         continue;
                     }
