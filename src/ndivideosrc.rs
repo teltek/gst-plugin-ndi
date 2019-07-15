@@ -90,7 +90,7 @@ struct TimestampData {
     offset: u64,
 }
 
-struct NdiVideoSrc {
+pub(crate) struct NdiVideoSrc {
     cat: gst::DebugCategory,
     settings: Mutex<Settings>,
     state: Mutex<State>,

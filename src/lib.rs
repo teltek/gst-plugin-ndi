@@ -1,8 +1,9 @@
 #[macro_use]
 extern crate glib;
+use glib::prelude::*;
+use glib::subclass::prelude::*;
 #[macro_use]
 extern crate gstreamer as gst;
-use gst::prelude::*;
 extern crate gstreamer_audio as gst_audio;
 extern crate gstreamer_base as gst_base;
 extern crate gstreamer_video as gst_video;
@@ -69,28 +70,18 @@ fn connect_ndi(
     gst_debug!(cat, obj: element, "Starting NDI connection...");
 
     let mut receivers = HASHMAP_RECEIVERS.lock().unwrap();
-    let mut audio = false;
-    let mut video = false;
 
-    if element
-        .get_factory()
-        .map(|f| f.get_name() == "ndiaudiosrc")
-        .unwrap_or(false)
-    {
-        audio = true;
-    } else {
-        video = true;
-    }
+    let video = element.get_type() == ndivideosrc::NdiVideoSrc::get_type();
 
     for val in receivers.values_mut() {
         if val.ip == ip || val.stream_name == stream_name {
-            if (val.audio && val.video) || (val.audio && audio) || (val.video && video) {
+            if (val.audio && val.video) || (val.audio && !video) || (val.video && video) {
                 continue;
             } else {
                 if video {
                     val.video = video;
                 } else {
-                    val.audio = audio;
+                    val.audio = !video;
                 }
                 return Some(val.id);
             }
@@ -174,7 +165,7 @@ fn connect_ndi(
             stream_name: source.ndi_name().to_owned(),
             ip: source.ip_address().to_owned(),
             video,
-            audio,
+            audio: !video,
             ndi_instance: recv,
             initial_timestamp: 0,
             id: id_receiver,
@@ -191,10 +182,11 @@ fn stop_ndi(cat: gst::DebugCategory, element: &gst_base::BaseSrc, id: usize) -> 
     {
         let val = receivers.get_mut(&id).unwrap();
         if val.video && val.audio {
-            if element.get_name().contains("audiosrc") {
-                val.audio = false;
-            } else {
+            let video = element.get_type() == ndivideosrc::NdiVideoSrc::get_type();
+            if video {
                 val.video = false;
+            } else {
+                val.audio = false;
             }
             return true;
         }

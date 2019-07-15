@@ -89,7 +89,7 @@ struct TimestampData {
     offset: u64,
 }
 
-struct NdiAudioSrc {
+pub(crate) struct NdiAudioSrc {
     cat: gst::DebugCategory,
     settings: Mutex<Settings>,
     state: Mutex<State>,
