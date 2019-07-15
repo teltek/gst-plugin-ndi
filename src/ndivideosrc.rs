@@ -126,10 +126,14 @@ impl ObjectSubclass for NdiVideoSrc {
                 (
                     "format",
                     &gst::List::new(&[
-                        //TODO add all formats
                         &gst_video::VideoFormat::Uyvy.to_string(),
-                        //&gst_video::VideoFormat::Rgb.to_string(),
-                        //&gst_video::VideoFormat::Gray8.to_string(),
+                        &gst_video::VideoFormat::Yv12.to_string(),
+                        &gst_video::VideoFormat::Nv12.to_string(),
+                        &gst_video::VideoFormat::I420.to_string(),
+                        &gst_video::VideoFormat::Bgra.to_string(),
+                        &gst_video::VideoFormat::Bgrx.to_string(),
+                        &gst_video::VideoFormat::Rgba.to_string(),
+                        &gst_video::VideoFormat::Rgbx.to_string(),
                     ]),
                 ),
                 ("width", &gst::IntRange::<i32>::new(0, i32::MAX)),
@@ -375,11 +379,24 @@ impl BaseSrcImpl for NdiVideoSrc {
             video_frame
         );
 
+        // YV12 and I420 are swapped in the NDI SDK compared to GStreamer
+        let format = match video_frame.fourcc() {
+            ndisys::NDIlib_FourCC_type_e::NDIlib_FourCC_type_UYVY => gst_video::VideoFormat::Uyvy,
+            ndisys::NDIlib_FourCC_type_e::NDIlib_FourCC_type_YV12 => gst_video::VideoFormat::I420,
+            ndisys::NDIlib_FourCC_type_e::NDIlib_FourCC_type_NV12 => gst_video::VideoFormat::Nv12,
+            ndisys::NDIlib_FourCC_type_e::NDIlib_FourCC_type_I420 => gst_video::VideoFormat::Yv12,
+            ndisys::NDIlib_FourCC_type_e::NDIlib_FourCC_type_BGRA => gst_video::VideoFormat::Bgra,
+            ndisys::NDIlib_FourCC_type_e::NDIlib_FourCC_type_BGRX => gst_video::VideoFormat::Bgrx,
+            ndisys::NDIlib_FourCC_type_e::NDIlib_FourCC_type_RGBA => gst_video::VideoFormat::Rgba,
+            ndisys::NDIlib_FourCC_type_e::NDIlib_FourCC_type_RGBX => gst_video::VideoFormat::Rgbx,
+            ndisys::NDIlib_FourCC_type_e::NDIlib_FourCC_type_UYVA => gst_video::VideoFormat::Uyvy,
+        };
+
         let par = gst::Fraction::approximate_f32(video_frame.picture_aspect_ratio()).unwrap() *
             gst::Fraction::new(video_frame.yres(), video_frame.xres());
 
         let info = gst_video::VideoInfo::new(
-                gst_video::VideoFormat::Uyvy,
+                format,
                 video_frame.xres() as u32,
                 video_frame.yres() as u32,
             )
@@ -415,10 +432,109 @@ impl BaseSrcImpl for NdiVideoSrc {
             let buffer = buffer.get_mut().unwrap();
             buffer.set_pts(pts);
             buffer.set_duration(duration);
-
-            // FIXME: This assumes that the strides match up
-            buffer.copy_from_slice(0, video_frame.data()).unwrap();
         }
+
+        let buffer = {
+            let mut vframe = gst_video::VideoFrame::from_buffer_writable(buffer, &state.info.as_ref().unwrap()).unwrap();
+
+            match format {
+                gst_video::VideoFormat::Uyvy |
+                gst_video::VideoFormat::Bgra |
+                gst_video::VideoFormat::Bgrx |
+                gst_video::VideoFormat::Rgba |
+                gst_video::VideoFormat::Rgbx => {
+                    let line_bytes = if format == gst_video::VideoFormat::Uyvy {
+                        2 * vframe.width() as usize
+                    } else {
+                        4 * vframe.width() as usize
+                    };
+                    let dest_stride = vframe.plane_stride()[0] as usize;
+                    let dest = vframe.plane_data_mut(0).unwrap();
+                    let src_stride = video_frame.line_stride_in_bytes() as usize;
+                    let src = video_frame.data();
+
+                    for (dest, src) in dest.chunks_exact_mut(dest_stride).zip(src.chunks_exact(src_stride)) {
+                        dest.copy_from_slice(src);
+                        dest.copy_from_slice(&src[..line_bytes]);
+                    }
+                },
+                gst_video::VideoFormat::Nv12 => {
+                    // First plane
+                    {
+                        let line_bytes = vframe.width() as usize;
+                        let dest_stride = vframe.plane_stride()[0] as usize;
+                        let dest = vframe.plane_data_mut(0).unwrap();
+                        let src_stride = video_frame.line_stride_in_bytes() as usize;
+                        let src = video_frame.data();
+
+                        for (dest, src) in dest.chunks_exact_mut(dest_stride).zip(src.chunks_exact(src_stride)) {
+                            dest.copy_from_slice(&src[..line_bytes]);
+                        }
+                    }
+
+                    // Second plane
+                    {
+                        let line_bytes = vframe.width() as usize;
+                        let dest_stride = vframe.plane_stride()[1] as usize;
+                        let dest = vframe.plane_data_mut(1).unwrap();
+                        let src_stride = video_frame.line_stride_in_bytes() as usize;
+                        let src = &video_frame.data()[(video_frame.yres() as usize * src_stride)..];
+
+                        for (dest, src) in dest.chunks_exact_mut(dest_stride).zip(src.chunks_exact(src_stride)) {
+                            dest.copy_from_slice(&src[..line_bytes]);
+                        }
+                    }
+
+                },
+                gst_video::VideoFormat::Yv12 |
+                gst_video::VideoFormat::I420 => {
+                    // First plane
+                    {
+                        let line_bytes = vframe.width() as usize;
+                        let dest_stride = vframe.plane_stride()[0] as usize;
+                        let dest = vframe.plane_data_mut(0).unwrap();
+                        let src_stride = video_frame.line_stride_in_bytes() as usize;
+                        let src = video_frame.data();
+
+                        for (dest, src) in dest.chunks_exact_mut(dest_stride).zip(src.chunks_exact(src_stride)) {
+                            dest.copy_from_slice(&src[..line_bytes]);
+                        }
+                    }
+
+                    // Second plane
+                    {
+                        let line_bytes = (vframe.width() as usize + 1) / 2;
+                        let dest_stride = vframe.plane_stride()[1] as usize;
+                        let dest = vframe.plane_data_mut(1).unwrap();
+                        let src_stride = video_frame.line_stride_in_bytes() as usize;
+                        let src_stride1 = video_frame.line_stride_in_bytes() as usize / 2;
+                        let src = &video_frame.data()[(video_frame.yres() as usize * src_stride)..];
+
+                        for (dest, src) in dest.chunks_exact_mut(dest_stride).zip(src.chunks_exact(src_stride1)) {
+                            dest.copy_from_slice(&src[..line_bytes]);
+                        }
+                    }
+
+                    // Third plane
+                    {
+                        let line_bytes = (vframe.width() as usize + 1) / 2;
+                        let dest_stride = vframe.plane_stride()[2] as usize;
+                        let dest = vframe.plane_data_mut(2).unwrap();
+                        let src_stride = video_frame.line_stride_in_bytes() as usize;
+                        let src_stride1 = video_frame.line_stride_in_bytes() as usize / 2;
+                        let src = &video_frame.data()[(video_frame.yres() as usize * src_stride +
+                            (video_frame.yres() as usize + 1) / 2 * src_stride1)..];
+
+                        for (dest, src) in dest.chunks_exact_mut(dest_stride).zip(src.chunks_exact(src_stride1)) {
+                            dest.copy_from_slice(&src[..line_bytes]);
+                        }
+                    }
+                },
+                _ => unreachable!(),
+            }
+
+            vframe.into_buffer()
+        };
 
         gst_log!(self.cat, obj: element, "Produced buffer {:?}", buffer);
 
