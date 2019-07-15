@@ -13,9 +13,9 @@ use std::sync::Mutex;
 use std::{i32, u32};
 
 use connect_ndi;
-use stop_ndi;
 use ndi::*;
 use ndisys;
+use stop_ndi;
 
 use HASHMAP_RECEIVERS;
 
@@ -231,8 +231,7 @@ impl ObjectImpl for NdiAudioSrc {
     }
 }
 
-impl ElementImpl for NdiAudioSrc {
-}
+impl ElementImpl for NdiAudioSrc {}
 
 impl BaseSrcImpl for NdiAudioSrc {
     fn start(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
@@ -309,11 +308,9 @@ impl BaseSrcImpl for NdiAudioSrc {
         let clock = element.get_clock().unwrap();
 
         let mut count_frame_none = 0;
-        let audio_frame =
-        loop {
+        let audio_frame = loop {
             // FIXME: make interruptable
-            let res =
-            loop {
+            let res = loop {
                 match recv.capture(false, true, false, 1000) {
                     Err(_) => break Err(()),
                     Ok(None) => break Ok(None),
@@ -326,7 +323,7 @@ impl BaseSrcImpl for NdiAudioSrc {
                 Err(_) => {
                     gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type error received, assuming that the source closed the stream...."]);
                     return Err(gst::FlowError::Error);
-                },
+                }
                 Ok(None) if settings.loss_threshold != 0 => {
                     if count_frame_none < settings.loss_threshold {
                         count_frame_none += 1;
@@ -334,16 +331,12 @@ impl BaseSrcImpl for NdiAudioSrc {
                     }
                     gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type none received, assuming that the source closed the stream...."]);
                     return Err(gst::FlowError::Error);
-                },
+                }
                 Ok(None) => {
-                    gst_debug!(
-                        self.cat,
-                        obj: element,
-                        "No audio frame received, retry"
-                    );
+                    gst_debug!(self.cat, obj: element, "No audio frame received, retry");
                     count_frame_none += 1;
                     continue;
-                },
+                }
                 Ok(Some(frame)) => frame,
             };
 
@@ -374,18 +367,20 @@ impl BaseSrcImpl for NdiAudioSrc {
         );
 
         let info = gst_audio::AudioInfo::new(
-                gst_audio::AUDIO_FORMAT_S16,
-                audio_frame.sample_rate() as u32,
-                audio_frame.no_channels() as u32,
-            )
-            .build()
-            .unwrap();
+            gst_audio::AUDIO_FORMAT_S16,
+            audio_frame.sample_rate() as u32,
+            audio_frame.no_channels() as u32,
+        )
+        .build()
+        .unwrap();
 
         if state.info.as_ref() != Some(&info) {
             let caps = info.to_caps().unwrap();
             state.info = Some(info);
             gst_debug!(self.cat, obj: element, "Configuring for caps {}", caps);
-            element.set_caps(&caps).map_err(|_| gst::FlowError::NotNegotiated)?;
+            element
+                .set_caps(&caps)
+                .map_err(|_| gst::FlowError::NotNegotiated)?;
         }
 
         gst_log!(
@@ -399,17 +394,24 @@ impl BaseSrcImpl for NdiAudioSrc {
         let buff_size = (audio_frame.no_samples() * 2 * audio_frame.no_channels()) as usize;
         let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
         {
-            let duration = gst::SECOND.mul_div_floor(audio_frame.no_samples() as u64, audio_frame.sample_rate() as u64).unwrap_or(gst::CLOCK_TIME_NONE);
+            let duration = gst::SECOND
+                .mul_div_floor(
+                    audio_frame.no_samples() as u64,
+                    audio_frame.sample_rate() as u64,
+                )
+                .unwrap_or(gst::CLOCK_TIME_NONE);
             let buffer = buffer.get_mut().unwrap();
 
             buffer.set_pts(pts);
             buffer.set_duration(duration);
 
-            audio_frame.copy_to_interleaved_16s(buffer
-                .map_writable()
-                .unwrap()
-                .as_mut_slice_of::<i16>()
-                .unwrap());
+            audio_frame.copy_to_interleaved_16s(
+                buffer
+                    .map_writable()
+                    .unwrap()
+                    .as_mut_slice_of::<i16>()
+                    .unwrap(),
+            );
         }
 
         gst_log!(self.cat, obj: element, "Produced buffer {:?}", buffer);

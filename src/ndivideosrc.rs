@@ -243,20 +243,14 @@ impl ObjectImpl for NdiVideoSrc {
     }
 }
 
-impl ElementImpl for NdiVideoSrc {
-}
+impl ElementImpl for NdiVideoSrc {}
 
 impl BaseSrcImpl for NdiVideoSrc {
     fn start(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
         *self.state.lock().unwrap() = Default::default();
         let mut state = self.state.lock().unwrap();
         let settings = self.settings.lock().unwrap().clone();
-        state.id_receiver = connect_ndi(
-            self.cat,
-            element,
-            &settings.ip,
-            &settings.stream_name,
-        );
+        state.id_receiver = connect_ndi(self.cat, element, &settings.ip, &settings.stream_name);
 
         // settings.id_receiver exists
         match state.id_receiver {
@@ -325,11 +319,9 @@ impl BaseSrcImpl for NdiVideoSrc {
         let clock = element.get_clock().unwrap();
 
         let mut count_frame_none = 0;
-        let video_frame =
-        loop {
+        let video_frame = loop {
             // FIXME: make interruptable
-            let res =
-            loop {
+            let res = loop {
                 match recv.capture(true, false, false, 1000) {
                     Err(_) => break Err(()),
                     Ok(None) => break Ok(None),
@@ -342,7 +334,7 @@ impl BaseSrcImpl for NdiVideoSrc {
                 Err(_) => {
                     gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type error received, assuming that the source closed the stream...."]);
                     return Err(gst::FlowError::Error);
-                },
+                }
                 Ok(None) if settings.loss_threshold != 0 => {
                     if count_frame_none < settings.loss_threshold {
                         count_frame_none += 1;
@@ -350,16 +342,12 @@ impl BaseSrcImpl for NdiVideoSrc {
                     }
                     gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type none received, assuming that the source closed the stream...."]);
                     return Err(gst::FlowError::Error);
-                },
+                }
                 Ok(None) => {
-                    gst_debug!(
-                        self.cat,
-                        obj: element,
-                        "No video frame received, retry"
-                    );
+                    gst_debug!(self.cat, obj: element, "No video frame received, retry");
                     count_frame_none += 1;
                     continue;
-                },
+                }
                 Ok(Some(frame)) => frame,
             };
 
@@ -402,30 +390,32 @@ impl BaseSrcImpl for NdiVideoSrc {
             ndisys::NDIlib_FourCC_type_e::NDIlib_FourCC_type_UYVA => gst_video::VideoFormat::Uyvy,
         };
 
-        let par = gst::Fraction::approximate_f32(video_frame.picture_aspect_ratio()).unwrap() *
-            gst::Fraction::new(video_frame.yres(), video_frame.xres());
+        let par = gst::Fraction::approximate_f32(video_frame.picture_aspect_ratio()).unwrap()
+            * gst::Fraction::new(video_frame.yres(), video_frame.xres());
 
-        let info = gst_video::VideoInfo::new(
-                format,
-                video_frame.xres() as u32,
-                video_frame.yres() as u32,
-            )
-            .fps(gst::Fraction::from(video_frame.frame_rate()))
-            .par(par)
-            .interlace_mode(if video_frame.frame_format_type() == ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_progressive {
-                    gst_video::VideoInterlaceMode::Progressive
-                } else {
-                    gst_video::VideoInterlaceMode::Interleaved
-                }
-            )
-            .build()
-            .unwrap();
+        let info =
+            gst_video::VideoInfo::new(format, video_frame.xres() as u32, video_frame.yres() as u32)
+                .fps(gst::Fraction::from(video_frame.frame_rate()))
+                .par(par)
+                .interlace_mode(
+                    if video_frame.frame_format_type()
+                        == ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_progressive
+                    {
+                        gst_video::VideoInterlaceMode::Progressive
+                    } else {
+                        gst_video::VideoInterlaceMode::Interleaved
+                    },
+                )
+                .build()
+                .unwrap();
 
         if state.info.as_ref() != Some(&info) {
             let caps = info.to_caps().unwrap();
             state.info = Some(info);
             gst_debug!(self.cat, obj: element, "Configuring for caps {}", caps);
-            element.set_caps(&caps).map_err(|_| gst::FlowError::NotNegotiated)?;
+            element
+                .set_caps(&caps)
+                .map_err(|_| gst::FlowError::NotNegotiated)?;
         }
 
         gst_log!(
@@ -438,21 +428,28 @@ impl BaseSrcImpl for NdiVideoSrc {
         let buff_size = (video_frame.yres() * video_frame.line_stride_in_bytes()) as usize;
         let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
         {
-            let duration = gst::SECOND.mul_div_floor(video_frame.frame_rate().1 as u64, video_frame.frame_rate().0 as u64).unwrap_or(gst::CLOCK_TIME_NONE);
+            let duration = gst::SECOND
+                .mul_div_floor(
+                    video_frame.frame_rate().1 as u64,
+                    video_frame.frame_rate().0 as u64,
+                )
+                .unwrap_or(gst::CLOCK_TIME_NONE);
             let buffer = buffer.get_mut().unwrap();
             buffer.set_pts(pts);
             buffer.set_duration(duration);
         }
 
         let buffer = {
-            let mut vframe = gst_video::VideoFrame::from_buffer_writable(buffer, &state.info.as_ref().unwrap()).unwrap();
+            let mut vframe =
+                gst_video::VideoFrame::from_buffer_writable(buffer, &state.info.as_ref().unwrap())
+                    .unwrap();
 
             match format {
-                gst_video::VideoFormat::Uyvy |
-                gst_video::VideoFormat::Bgra |
-                gst_video::VideoFormat::Bgrx |
-                gst_video::VideoFormat::Rgba |
-                gst_video::VideoFormat::Rgbx => {
+                gst_video::VideoFormat::Uyvy
+                | gst_video::VideoFormat::Bgra
+                | gst_video::VideoFormat::Bgrx
+                | gst_video::VideoFormat::Rgba
+                | gst_video::VideoFormat::Rgbx => {
                     let line_bytes = if format == gst_video::VideoFormat::Uyvy {
                         2 * vframe.width() as usize
                     } else {
@@ -463,11 +460,14 @@ impl BaseSrcImpl for NdiVideoSrc {
                     let src_stride = video_frame.line_stride_in_bytes() as usize;
                     let src = video_frame.data();
 
-                    for (dest, src) in dest.chunks_exact_mut(dest_stride).zip(src.chunks_exact(src_stride)) {
+                    for (dest, src) in dest
+                        .chunks_exact_mut(dest_stride)
+                        .zip(src.chunks_exact(src_stride))
+                    {
                         dest.copy_from_slice(src);
                         dest.copy_from_slice(&src[..line_bytes]);
                     }
-                },
+                }
                 gst_video::VideoFormat::Nv12 => {
                     // First plane
                     {
@@ -477,7 +477,10 @@ impl BaseSrcImpl for NdiVideoSrc {
                         let src_stride = video_frame.line_stride_in_bytes() as usize;
                         let src = video_frame.data();
 
-                        for (dest, src) in dest.chunks_exact_mut(dest_stride).zip(src.chunks_exact(src_stride)) {
+                        for (dest, src) in dest
+                            .chunks_exact_mut(dest_stride)
+                            .zip(src.chunks_exact(src_stride))
+                        {
                             dest.copy_from_slice(&src[..line_bytes]);
                         }
                     }
@@ -490,14 +493,15 @@ impl BaseSrcImpl for NdiVideoSrc {
                         let src_stride = video_frame.line_stride_in_bytes() as usize;
                         let src = &video_frame.data()[(video_frame.yres() as usize * src_stride)..];
 
-                        for (dest, src) in dest.chunks_exact_mut(dest_stride).zip(src.chunks_exact(src_stride)) {
+                        for (dest, src) in dest
+                            .chunks_exact_mut(dest_stride)
+                            .zip(src.chunks_exact(src_stride))
+                        {
                             dest.copy_from_slice(&src[..line_bytes]);
                         }
                     }
-
-                },
-                gst_video::VideoFormat::Yv12 |
-                gst_video::VideoFormat::I420 => {
+                }
+                gst_video::VideoFormat::Yv12 | gst_video::VideoFormat::I420 => {
                     // First plane
                     {
                         let line_bytes = vframe.width() as usize;
@@ -506,7 +510,10 @@ impl BaseSrcImpl for NdiVideoSrc {
                         let src_stride = video_frame.line_stride_in_bytes() as usize;
                         let src = video_frame.data();
 
-                        for (dest, src) in dest.chunks_exact_mut(dest_stride).zip(src.chunks_exact(src_stride)) {
+                        for (dest, src) in dest
+                            .chunks_exact_mut(dest_stride)
+                            .zip(src.chunks_exact(src_stride))
+                        {
                             dest.copy_from_slice(&src[..line_bytes]);
                         }
                     }
@@ -520,7 +527,10 @@ impl BaseSrcImpl for NdiVideoSrc {
                         let src_stride1 = video_frame.line_stride_in_bytes() as usize / 2;
                         let src = &video_frame.data()[(video_frame.yres() as usize * src_stride)..];
 
-                        for (dest, src) in dest.chunks_exact_mut(dest_stride).zip(src.chunks_exact(src_stride1)) {
+                        for (dest, src) in dest
+                            .chunks_exact_mut(dest_stride)
+                            .zip(src.chunks_exact(src_stride1))
+                        {
                             dest.copy_from_slice(&src[..line_bytes]);
                         }
                     }
@@ -532,14 +542,17 @@ impl BaseSrcImpl for NdiVideoSrc {
                         let dest = vframe.plane_data_mut(2).unwrap();
                         let src_stride = video_frame.line_stride_in_bytes() as usize;
                         let src_stride1 = video_frame.line_stride_in_bytes() as usize / 2;
-                        let src = &video_frame.data()[(video_frame.yres() as usize * src_stride +
-                            (video_frame.yres() as usize + 1) / 2 * src_stride1)..];
+                        let src = &video_frame.data()[(video_frame.yres() as usize * src_stride
+                            + (video_frame.yres() as usize + 1) / 2 * src_stride1)..];
 
-                        for (dest, src) in dest.chunks_exact_mut(dest_stride).zip(src.chunks_exact(src_stride1)) {
+                        for (dest, src) in dest
+                            .chunks_exact_mut(dest_stride)
+                            .zip(src.chunks_exact(src_stride1))
+                        {
                             dest.copy_from_slice(&src[..line_bytes]);
                         }
                     }
-                },
+                }
                 _ => unreachable!(),
             }
 

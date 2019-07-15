@@ -12,17 +12,17 @@ extern crate gstreamer_video as gst_video;
 extern crate lazy_static;
 extern crate byte_slice_cast;
 
-pub mod ndisys;
 pub mod ndi;
 mod ndiaudiosrc;
+pub mod ndisys;
 mod ndivideosrc;
 
-use ndisys::*;
 use ndi::*;
+use ndisys::*;
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 
 fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
     if !ndi::initialize() {
@@ -87,7 +87,7 @@ fn connect_ndi(
                 ["Cannot run NDI: NDIlib_find_create_v2 error"]
             );
             return None;
-        },
+        }
         Some(find) => find,
     };
 
@@ -106,15 +106,15 @@ fn connect_ndi(
         return None;
     }
 
-    let source = sources.iter().find(|s| {
-        s.ndi_name() == stream_name || s.ip_address() == ip
-    });
+    let source = sources
+        .iter()
+        .find(|s| s.ndi_name() == stream_name || s.ip_address() == ip);
 
     let source = match source {
         None => {
             gst_element_error!(element, gst::ResourceError::OpenRead, ["Stream not found"]);
             return None;
-        },
+        }
         Some(source) => source,
     };
 
@@ -140,7 +140,7 @@ fn connect_ndi(
                 ["Cannot run NDI: NDIlib_recv_create_v3 error"]
             );
             return None;
-        },
+        }
         Some(recv) => recv,
     };
 
