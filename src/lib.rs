@@ -66,13 +66,13 @@ fn connect_ndi(
 
     for val in receivers.values_mut() {
         if val.ip == ip || val.stream_name == stream_name {
-            if (val.audio && val.video) || (val.audio && !video) || (val.video && video) {
+            if (val.video || !video) && (val.audio || video) {
                 continue;
             } else {
                 if video {
-                    val.video = video;
+                    val.video = true;
                 } else {
-                    val.audio = !video;
+                    val.audio = true;
                 }
                 return Some(val.id);
             }
