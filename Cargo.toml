@@ -8,15 +8,19 @@ description = "NewTek NDI Plugin"
 
 [dependencies]
 glib = { version = "0.8.0", features = ["subclassing"] }
-gstreamer = { version = "0.14.0", features = ["subclassing"] }
+gstreamer = { version = "0.14.3", features = ["subclassing"] }
 gstreamer-base = { version = "0.14.0", features = ["subclassing"] }
 gstreamer-audio = "0.14.0"
-gstreamer-video = "0.14.0"
+gstreamer-video = "0.14.3"
 lazy_static = "1.1.0"
 byte-slice-cast = "0.2.0"
 
 [build-dependencies]
 gst-plugin-version-helper = "0.1"
+
+[features]
+default = ["interlaced-fields"]
+interlaced-fields = ["gstreamer/v1_16", "gstreamer-video/v1_16"]
 
 [lib]
 name = "gstndi"

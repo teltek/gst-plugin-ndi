@@ -360,13 +360,24 @@ impl<'a> VideoFrame<'a> {
     }
 
     pub fn data(&self) -> &[u8] {
+        // FIXME: Unclear if this is correct. Needs to be validated against an actual
+        // interlaced stream
+        let frame_size = if self.frame_format_type()
+            == NDIlib_frame_format_type_e::NDIlib_frame_format_type_field_0
+            || self.frame_format_type()
+                == NDIlib_frame_format_type_e::NDIlib_frame_format_type_field_1
+        {
+            self.yres() * self.line_stride_in_bytes() / 2
+        } else {
+            self.yres() * self.line_stride_in_bytes()
+        };
+
         unsafe {
             use std::slice;
             match self {
-                VideoFrame::Borrowed(ref frame, _) => slice::from_raw_parts(
-                    frame.p_data as *const u8,
-                    (frame.yres * frame.line_stride_in_bytes) as usize,
-                ),
+                VideoFrame::Borrowed(ref frame, _) => {
+                    slice::from_raw_parts(frame.p_data as *const u8, frame_size as usize)
+                }
             }
         }
     }

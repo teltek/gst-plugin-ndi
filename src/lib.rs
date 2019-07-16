@@ -127,10 +127,13 @@ fn connect_ndi(
         source.ip_address(),
     );
 
+    // FIXME: Property for the name and bandwidth
+    // FIXME: Ideally we would use NDIlib_recv_color_format_fastest here but that seems to be
+    // broken with interlaced content currently
     let recv = RecvInstance::builder(&source, "Galicaster NDI Receiver")
         .bandwidth(NDIlib_recv_bandwidth_e::NDIlib_recv_bandwidth_highest)
         .color_format(NDIlib_recv_color_format_e::NDIlib_recv_color_format_UYVY_BGRA)
-        .allow_video_fields(false)
+        .allow_video_fields(true)
         .build();
     let recv = match recv {
         None => {

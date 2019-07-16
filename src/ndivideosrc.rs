@@ -9,6 +9,7 @@ use gst_base::prelude::*;
 use gst_base::subclass::prelude::*;
 
 use gst_video;
+use gst_video::prelude::*;
 
 use std::sync::Mutex;
 use std::{i32, u32};
@@ -147,6 +148,23 @@ impl ObjectSubclass for NdiVideoSrc {
                 ),
             ],
         );
+
+        #[cfg(feature = "interlaced-fields")]
+        let caps = {
+            let mut tmp = caps.copy();
+            {
+                let tmp = tmp.get_mut().unwrap();
+                tmp.set_features_simple(Some(gst::CapsFeatures::new(&["format:Interlaced"])));
+            }
+
+            let mut caps = caps;
+            {
+                let caps = caps.get_mut().unwrap();
+                caps.append(tmp);
+            }
+
+            caps
+        };
 
         let src_pad_template = gst::PadTemplate::new(
             "src",
@@ -393,7 +411,48 @@ impl BaseSrcImpl for NdiVideoSrc {
         let par = gst::Fraction::approximate_f32(video_frame.picture_aspect_ratio()).unwrap()
             * gst::Fraction::new(video_frame.yres(), video_frame.xres());
 
-        let info =
+        #[cfg(feature = "interlaced-fields")]
+        let info = {
+            let mut builder = gst_video::VideoInfo::new(
+                format,
+                video_frame.xres() as u32,
+                video_frame.yres() as u32,
+            )
+            .fps(gst::Fraction::from(video_frame.frame_rate()))
+            .par(par)
+            .interlace_mode(match video_frame.frame_format_type() {
+                ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_progressive => {
+                    gst_video::VideoInterlaceMode::Progressive
+                }
+                ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_interleaved => {
+                    gst_video::VideoInterlaceMode::Interleaved
+                }
+                _ => gst_video::VideoInterlaceMode::Alternate,
+            });
+
+            /* Requires GStreamer 1.12 at least */
+            if video_frame.frame_format_type()
+                == ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_interleaved
+            {
+                builder = builder.field_order(gst_video::VideoFieldOrder::TopFieldFirst);
+            }
+
+            builder.build().unwrap()
+        };
+
+        #[cfg(not(feature = "interlaced-fields"))]
+        let info = if video_frame.frame_format_type()
+            != ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_progressive
+            && video_frame.frame_format_type()
+                != ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_interleaved
+        {
+            gst_element_error!(
+                element,
+                gst::StreamError::Format,
+                ["Separate field interlacing not supported"]
+            );
+            return Err(gst::FlowError::NotNegotiated);
+        } else {
             gst_video::VideoInfo::new(format, video_frame.xres() as u32, video_frame.yres() as u32)
                 .fps(gst::Fraction::from(video_frame.frame_rate()))
                 .par(par)
@@ -407,7 +466,8 @@ impl BaseSrcImpl for NdiVideoSrc {
                     },
                 )
                 .build()
-                .unwrap();
+                .unwrap()
+        };
 
         if state.info.as_ref() != Some(&info) {
             let caps = info.to_caps().unwrap();
@@ -425,8 +485,7 @@ impl BaseSrcImpl for NdiVideoSrc {
             pts
         );
 
-        let buff_size = (video_frame.yres() * video_frame.line_stride_in_bytes()) as usize;
-        let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
+        let mut buffer = gst::Buffer::with_size(state.info.as_ref().unwrap().size()).unwrap();
         {
             let duration = gst::SECOND
                 .mul_div_floor(
@@ -437,6 +496,42 @@ impl BaseSrcImpl for NdiVideoSrc {
             let buffer = buffer.get_mut().unwrap();
             buffer.set_pts(pts);
             buffer.set_duration(duration);
+
+            #[cfg(feature = "interlaced-fields")]
+            {
+                match video_frame.frame_format_type() {
+                    ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_interleaved => {
+                        buffer.set_video_flags(
+                            gst_video::VideoBufferFlags::INTERLACED
+                                | gst_video::VideoBufferFlags::TFF,
+                        );
+                    }
+                    ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_field_0 => {
+                        buffer.set_video_flags(
+                            gst_video::VideoBufferFlags::INTERLACED
+                                | gst_video::VideoBufferFlags::TOP_FIELD,
+                        );
+                    }
+                    ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_field_1 => {
+                        buffer.set_video_flags(
+                            gst_video::VideoBufferFlags::INTERLACED
+                                | gst_video::VideoBufferFlags::BOTTOM_FIELD,
+                        );
+                    }
+                    _ => (),
+                };
+            }
+
+            #[cfg(not(feature = "interlaced-fields"))]
+            {
+                if video_frame.frame_format_type()
+                    == ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_interleaved
+                {
+                    buffer.set_video_flags(
+                        gst_video::VideoBufferFlags::INTERLACED | gst_video::VideoBufferFlags::TFF,
+                    );
+                }
+            }
         }
 
         let buffer = {
