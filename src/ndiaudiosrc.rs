@@ -17,6 +17,7 @@ use ndi::*;
 use ndisys;
 use stop_ndi;
 
+use TimestampMode;
 use HASHMAP_RECEIVERS;
 #[cfg(feature = "reference-timestamps")]
 use TIMECODE_CAPS;
@@ -30,6 +31,7 @@ struct Settings {
     stream_name: String,
     ip: String,
     loss_threshold: u32,
+    timestamp_mode: TimestampMode,
 }
 
 impl Default for Settings {
@@ -38,32 +40,33 @@ impl Default for Settings {
             stream_name: String::from("Fixed ndi stream name"),
             ip: String::from(""),
             loss_threshold: 5,
+            timestamp_mode: TimestampMode::ReceiveTime,
         }
     }
 }
 
-static PROPERTIES: [subclass::Property; 3] = [
-    subclass::Property("stream-name", |_| {
+static PROPERTIES: [subclass::Property; 4] = [
+    subclass::Property("stream-name", |name| {
         glib::ParamSpec::string(
-            "stream-name",
-            "Sream Name",
+            name,
+            "Stream Name",
             "Name of the streaming device",
             None,
             glib::ParamFlags::READWRITE,
         )
     }),
-    subclass::Property("ip", |_| {
+    subclass::Property("ip", |name| {
         glib::ParamSpec::string(
-            "ip",
+            name,
             "Stream IP",
             "IP of the streaming device. Ex: 127.0.0.1:5961",
             None,
             glib::ParamFlags::READWRITE,
         )
     }),
-    subclass::Property("loss-threshold", |_| {
+    subclass::Property("loss-threshold", |name| {
         glib::ParamSpec::uint(
-            "loss-threshold",
+            name,
             "Loss threshold",
             "Loss threshold",
             0,
@@ -72,11 +75,22 @@ static PROPERTIES: [subclass::Property; 3] = [
             glib::ParamFlags::READWRITE,
         )
     }),
+    subclass::Property("timestamp-mode", |name| {
+        glib::ParamSpec::enum_(
+            name,
+            "Timestamp Mode",
+            "Timestamp information to use for outgoing PTS",
+            TimestampMode::static_type(),
+            TimestampMode::ReceiveTime as i32,
+            glib::ParamFlags::READWRITE,
+        )
+    }),
 ];
 
 struct State {
     info: Option<gst_audio::AudioInfo>,
     id_receiver: Option<usize>,
+    current_latency: gst::ClockTime,
 }
 
 impl Default for State {
@@ -84,6 +98,7 @@ impl Default for State {
         State {
             info: None,
             id_receiver: None,
+            current_latency: gst::CLOCK_TIME_NONE,
         }
     }
 }
@@ -177,7 +192,6 @@ impl ObjectImpl for NdiAudioSrc {
                     stream_name
                 );
                 settings.stream_name = stream_name;
-                drop(settings);
             }
             subclass::Property("ip", ..) => {
                 let mut settings = self.settings.lock().unwrap();
@@ -190,7 +204,6 @@ impl ObjectImpl for NdiAudioSrc {
                     ip
                 );
                 settings.ip = ip;
-                drop(settings);
             }
             subclass::Property("loss-threshold", ..) => {
                 let mut settings = self.settings.lock().unwrap();
@@ -203,7 +216,22 @@ impl ObjectImpl for NdiAudioSrc {
                     loss_threshold
                 );
                 settings.loss_threshold = loss_threshold;
-                drop(settings);
+            }
+            subclass::Property("timestamp-mode", ..) => {
+                let mut settings = self.settings.lock().unwrap();
+                let timestamp_mode = value.get().unwrap();
+                gst_debug!(
+                    self.cat,
+                    obj: basesrc,
+                    "Changing timestamp mode from {:?} to {:?}",
+                    settings.timestamp_mode,
+                    timestamp_mode
+                );
+                if settings.timestamp_mode != timestamp_mode {
+                    let _ = basesrc
+                        .post_message(&gst::Message::new_latency().src(Some(basesrc)).build());
+                }
+                settings.timestamp_mode = timestamp_mode;
             }
             _ => unimplemented!(),
         }
@@ -224,6 +252,10 @@ impl ObjectImpl for NdiAudioSrc {
             subclass::Property("loss-threshold", ..) => {
                 let settings = self.settings.lock().unwrap();
                 Ok(settings.loss_threshold.to_value())
+            }
+            subclass::Property("timestamp-mode", ..) => {
+                let settings = self.settings.lock().unwrap();
+                Ok(settings.timestamp_mode.to_value())
             }
             _ => unimplemented!(),
         }
@@ -273,6 +305,24 @@ impl BaseSrcImpl for NdiAudioSrc {
                 q.set(gst::SchedulingFlags::SEQUENTIAL, 1, -1, 0);
                 q.add_scheduling_modes(&[gst::PadMode::Push]);
                 true
+            }
+            QueryView::Latency(ref mut q) => {
+                let state = self.state.lock().unwrap();
+                let settings = self.settings.lock().unwrap();
+
+                if state.current_latency.is_some() {
+                    let latency = if settings.timestamp_mode == TimestampMode::Timestamp {
+                        state.current_latency
+                    } else {
+                        0.into()
+                    };
+
+                    gst_debug!(self.cat, obj: element, "Returning latency {}", latency);
+                    q.set(true, latency, gst::CLOCK_TIME_NONE);
+                    true
+                } else {
+                    false
+                }
             }
             _ => BaseSrcImplExt::parent_query(self, element, query),
         }
@@ -346,23 +396,52 @@ impl BaseSrcImpl for NdiAudioSrc {
         // will want to work with the timestamp given by the NDI SDK if available
         let now = clock.get_time();
         let base_time = element.get_base_time();
-        let pts = now - base_time;
+        let receive_time = now - base_time;
+
+        let real_time_now = gst::ClockTime::from(glib::get_real_time() as u64 * 1000);
+        let timestamp = if audio_frame.timestamp() == ndisys::NDIlib_recv_timestamp_undefined {
+            gst::CLOCK_TIME_NONE
+        } else {
+            gst::ClockTime::from(audio_frame.timestamp() as u64 * 100)
+        };
+        let timecode = gst::ClockTime::from(audio_frame.timecode() as u64 * 100);
 
         gst_log!(
             self.cat,
             obj: element,
-            "NDI audio frame received: {:?} with timecode {} and timestamp {}",
+            "NDI audio frame received: {:?} with timecode {} and timestamp {}, receive time {}, local time now {}",
             audio_frame,
-            if audio_frame.timecode() == ndisys::NDIlib_send_timecode_synthesize {
-                gst::CLOCK_TIME_NONE
-            } else {
-                gst::ClockTime::from(audio_frame.timecode() as u64 * 100)
-            },
-            if audio_frame.timestamp() == ndisys::NDIlib_recv_timestamp_undefined {
-                gst::CLOCK_TIME_NONE
-            } else {
-                gst::ClockTime::from(audio_frame.timestamp() as u64 * 100)
-            },
+            timecode,
+            timestamp,
+            receive_time,
+            real_time_now,
+        );
+
+        let pts = match settings.timestamp_mode {
+            TimestampMode::ReceiveTime => receive_time,
+            TimestampMode::Timecode => timecode,
+            TimestampMode::Timestamp if timestamp.is_none() => receive_time,
+            TimestampMode::Timestamp => {
+                // Timestamps are relative to the UNIX epoch
+                if real_time_now > timestamp {
+                    let diff = real_time_now - timestamp;
+                    if diff > receive_time {
+                        0.into()
+                    } else {
+                        receive_time - diff
+                    }
+                } else {
+                    let diff = timestamp - real_time_now;
+                    receive_time + diff
+                }
+            }
+        };
+
+        gst_log!(
+            self.cat,
+            obj: element,
+            "Calculated pts for audio frame: {:?}",
+            pts
         );
 
         let info = gst_audio::AudioInfo::new(
@@ -376,18 +455,20 @@ impl BaseSrcImpl for NdiAudioSrc {
         if state.info.as_ref() != Some(&info) {
             let caps = info.to_caps().unwrap();
             state.info = Some(info);
+            state.current_latency = gst::SECOND
+                .mul_div_ceil(
+                    audio_frame.no_samples() as u64,
+                    audio_frame.sample_rate() as u64,
+                )
+                .unwrap_or(gst::CLOCK_TIME_NONE);
+
             gst_debug!(self.cat, obj: element, "Configuring for caps {}", caps);
             element
                 .set_caps(&caps)
                 .map_err(|_| gst::FlowError::NotNegotiated)?;
-        }
 
-        gst_log!(
-            self.cat,
-            obj: element,
-            "Calculated pts for audio frame: {:?}",
-            pts
-        );
+            let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
+        }
 
         // We multiply by 2 because is the size in bytes of an i16 variable
         let buff_size = (audio_frame.no_samples() * 2 * audio_frame.no_channels()) as usize;
