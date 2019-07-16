@@ -19,8 +19,9 @@ byte-slice-cast = "0.2.0"
 gst-plugin-version-helper = "0.1"
 
 [features]
-default = ["interlaced-fields"]
+default = ["interlaced-fields", "reference-timestamps"]
 interlaced-fields = ["gstreamer/v1_16", "gstreamer-video/v1_16"]
+reference-timestamps = ["gstreamer/v1_14"]
 
 [lib]
 name = "gstndi"

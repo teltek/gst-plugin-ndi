@@ -21,6 +21,10 @@ use connect_ndi;
 use stop_ndi;
 
 use HASHMAP_RECEIVERS;
+#[cfg(feature = "reference-timestamps")]
+use TIMECODE_CAPS;
+#[cfg(feature = "reference-timestamps")]
+use TIMESTAMP_CAPS;
 
 #[derive(Debug, Clone)]
 struct Settings {
@@ -496,6 +500,24 @@ impl BaseSrcImpl for NdiVideoSrc {
             let buffer = buffer.get_mut().unwrap();
             buffer.set_pts(pts);
             buffer.set_duration(duration);
+
+            #[cfg(feature = "reference-timestamps")]
+            {
+                gst::ReferenceTimestampMeta::add(
+                    buffer,
+                    &*TIMECODE_CAPS,
+                    gst::ClockTime::from(video_frame.timecode() as u64 * 100),
+                    gst::CLOCK_TIME_NONE,
+                );
+                if video_frame.timestamp() != ndisys::NDIlib_recv_timestamp_undefined {
+                    gst::ReferenceTimestampMeta::add(
+                        buffer,
+                        &*TIMESTAMP_CAPS,
+                        gst::ClockTime::from(video_frame.timestamp() as u64 * 100),
+                        gst::CLOCK_TIME_NONE,
+                    );
+                }
+            }
 
             #[cfg(feature = "interlaced-fields")]
             {

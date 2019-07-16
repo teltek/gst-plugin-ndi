@@ -48,6 +48,16 @@ lazy_static! {
         let m = HashMap::new();
         Mutex::new(m)
     };
+
+    #[cfg(feature = "reference-timestamps")]
+    static ref TIMECODE_CAPS: gst::Caps = {
+        gst::Caps::new_simple("timestamp/x-ndi-timecode", &[])
+    };
+
+    #[cfg(feature = "reference-timestamps")]
+    static ref TIMESTAMP_CAPS: gst::Caps = {
+        gst::Caps::new_simple("timestamp/x-ndi-timestamp", &[])
+    };
 }
 
 static ID_RECEIVER: AtomicUsize = AtomicUsize::new(0);

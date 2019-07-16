@@ -18,6 +18,10 @@ use ndisys;
 use stop_ndi;
 
 use HASHMAP_RECEIVERS;
+#[cfg(feature = "reference-timestamps")]
+use TIMECODE_CAPS;
+#[cfg(feature = "reference-timestamps")]
+use TIMESTAMP_CAPS;
 
 use byte_slice_cast::AsMutSliceOf;
 
@@ -399,6 +403,24 @@ impl BaseSrcImpl for NdiAudioSrc {
 
             buffer.set_pts(pts);
             buffer.set_duration(duration);
+
+            #[cfg(feature = "reference-timestamps")]
+            {
+                gst::ReferenceTimestampMeta::add(
+                    buffer,
+                    &*TIMECODE_CAPS,
+                    gst::ClockTime::from(audio_frame.timecode() as u64 * 100),
+                    gst::CLOCK_TIME_NONE,
+                );
+                if audio_frame.timestamp() != ndisys::NDIlib_recv_timestamp_undefined {
+                    gst::ReferenceTimestampMeta::add(
+                        buffer,
+                        &*TIMESTAMP_CAPS,
+                        gst::ClockTime::from(audio_frame.timestamp() as u64 * 100),
+                        gst::CLOCK_TIME_NONE,
+                    );
+                }
+            }
 
             audio_frame.copy_to_interleaved_16s(
                 buffer
