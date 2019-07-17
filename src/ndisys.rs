@@ -88,14 +88,12 @@ pub enum NDIlib_frame_type_e {
     NDIlib_frame_type_status_change = 100,
 }
 
-#[repr(i32)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum NDIlib_recv_bandwidth_e {
-    NDIlib_recv_bandwidth_metadata_only = -10,
-    NDIlib_recv_bandwidth_audio_only = 10,
-    NDIlib_recv_bandwidth_lowest = 0,
-    NDIlib_recv_bandwidth_highest = 100,
-}
+pub type NDIlib_recv_bandwidth_e = i32;
+
+pub const NDIlib_recv_bandwidth_metadata_only: NDIlib_recv_bandwidth_e = -10;
+pub const NDIlib_recv_bandwidth_audio_only: NDIlib_recv_bandwidth_e = 10;
+pub const NDIlib_recv_bandwidth_lowest: NDIlib_recv_bandwidth_e = 0;
+pub const NDIlib_recv_bandwidth_highest: NDIlib_recv_bandwidth_e = 100;
 
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]

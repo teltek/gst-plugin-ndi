@@ -23,6 +23,7 @@ use ndisys::*;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
+use std::time;
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
 #[repr(u32)]
@@ -44,8 +45,8 @@ fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
 
 struct ReceiverInfo {
     id: usize,
-    stream_name: String,
-    ip: String,
+    ndi_name: String,
+    ip_address: String,
     video: bool,
     audio: bool,
     ndi_instance: RecvInstance,
@@ -55,6 +56,10 @@ lazy_static! {
     static ref HASHMAP_RECEIVERS: Mutex<HashMap<usize, ReceiverInfo>> = {
         let m = HashMap::new();
         Mutex::new(m)
+    };
+
+    static ref DEFAULT_RECEIVER_NDI_NAME: String = {
+        format!("GStreamer NDI Source {}-{}", env!("CARGO_PKG_VERSION"), env!("COMMIT_ID"))
     };
 
     #[cfg(feature = "reference-timestamps")]
@@ -73,8 +78,11 @@ static ID_RECEIVER: AtomicUsize = AtomicUsize::new(0);
 fn connect_ndi(
     cat: gst::DebugCategory,
     element: &gst_base::BaseSrc,
-    ip: &str,
-    stream_name: &str,
+    ip_address: Option<&str>,
+    ndi_name: Option<&str>,
+    receiver_ndi_name: &str,
+    connect_timeout: u32,
+    bandwidth: NDIlib_recv_bandwidth_e,
 ) -> Option<usize> {
     gst_debug!(cat, obj: element, "Starting NDI connection...");
 
@@ -83,7 +91,7 @@ fn connect_ndi(
     let video = element.get_type() == ndivideosrc::NdiVideoSrc::get_type();
 
     for val in receivers.values_mut() {
-        if val.ip == ip || val.stream_name == stream_name {
+        if Some(val.ip_address.as_str()) == ip_address || Some(val.ndi_name.as_str()) == ndi_name {
             if (val.video || !video) && (val.audio || video) {
                 continue;
             } else {
@@ -109,47 +117,45 @@ fn connect_ndi(
         Some(find) => find,
     };
 
-    // TODO Sleep 1s to wait for all sources
-    find.wait_for_sources(2000);
+    let timeout = time::Instant::now();
+    let source = loop {
+        find.wait_for_sources(50);
 
-    let sources = find.get_current_sources();
+        let sources = find.get_current_sources();
 
-    // We need at least one source
-    if sources.is_empty() {
-        gst_element_error!(
-            element,
-            gst::CoreError::Negotiation,
-            ["Error getting NDIlib_find_get_current_sources"]
+        gst_debug!(
+            cat,
+            obj: element,
+            "Total sources found in network {}",
+            sources.len(),
         );
-        return None;
-    }
 
-    let source = sources
-        .iter()
-        .find(|s| s.ndi_name() == stream_name || s.ip_address() == ip);
+        let source = sources
+            .iter()
+            .find(|s| Some(s.ndi_name()) == ndi_name || Some(s.ip_address()) == ip_address);
 
-    let source = match source {
-        None => {
-            gst_element_error!(element, gst::ResourceError::OpenRead, ["Stream not found"]);
+        if let Some(source) = source {
+            break source.to_owned();
+        }
+
+        if timeout.elapsed().as_millis() >= connect_timeout as u128 {
+            gst_element_error!(element, gst::ResourceError::NotFound, ["Stream not found"]);
             return None;
         }
-        Some(source) => source,
     };
 
     gst_debug!(
         cat,
         obj: element,
-        "Total sources in network {}: Connecting to NDI source with name '{}' and address '{}'",
-        sources.len(),
+        "Connecting to NDI source with ndi-name '{}' and ip-address '{}'",
         source.ndi_name(),
         source.ip_address(),
     );
 
-    // FIXME: Property for the name and bandwidth
     // FIXME: Ideally we would use NDIlib_recv_color_format_fastest here but that seems to be
     // broken with interlaced content currently
-    let recv = RecvInstance::builder(&source, "Galicaster NDI Receiver")
-        .bandwidth(NDIlib_recv_bandwidth_e::NDIlib_recv_bandwidth_highest)
+    let recv = RecvInstance::builder(&source, receiver_ndi_name)
+        .bandwidth(bandwidth)
         .color_format(NDIlib_recv_color_format_e::NDIlib_recv_color_format_UYVY_BGRA)
         .allow_video_fields(true)
         .build();
@@ -174,12 +180,12 @@ fn connect_ndi(
     receivers.insert(
         id_receiver,
         ReceiverInfo {
-            stream_name: source.ndi_name().to_owned(),
-            ip: source.ip_address().to_owned(),
+            id: id_receiver,
+            ndi_name: source.ndi_name().to_owned(),
+            ip_address: source.ip_address().to_owned(),
             video,
             audio: !video,
             ndi_instance: recv,
-            id: id_receiver,
         },
     );
 

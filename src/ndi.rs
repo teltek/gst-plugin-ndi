@@ -94,7 +94,7 @@ impl FindInstance {
 
             let mut sources = vec![];
             for i in 0..no_sources {
-                sources.push(Source(
+                sources.push(Source::Borrowed(
                     ptr::NonNull::new(sources_ptr.add(i as usize) as *mut _).unwrap(),
                     self,
                 ));
@@ -114,26 +114,76 @@ impl Drop for FindInstance {
 }
 
 #[derive(Debug)]
-pub struct Source<'a>(ptr::NonNull<NDIlib_source_t>, &'a FindInstance);
+pub enum Source<'a> {
+    Borrowed(ptr::NonNull<NDIlib_source_t>, &'a FindInstance),
+    Owned(NDIlib_source_t, ffi::CString, ffi::CString),
+}
 
 unsafe impl<'a> Send for Source<'a> {}
 
 impl<'a> Source<'a> {
     pub fn ndi_name(&self) -> &str {
         unsafe {
-            assert!(!self.0.as_ref().p_ndi_name.is_null());
-            ffi::CStr::from_ptr(self.0.as_ref().p_ndi_name)
-                .to_str()
-                .unwrap()
+            let ptr = match *self {
+                Source::Borrowed(ptr, _) => &*ptr.as_ptr(),
+                Source::Owned(ref source, _, _) => source,
+            };
+
+            assert!(!ptr.p_ndi_name.is_null());
+            ffi::CStr::from_ptr(ptr.p_ndi_name).to_str().unwrap()
         }
     }
 
     pub fn ip_address(&self) -> &str {
         unsafe {
-            assert!(!self.0.as_ref().p_ip_address.is_null());
-            ffi::CStr::from_ptr(self.0.as_ref().p_ip_address)
-                .to_str()
-                .unwrap()
+            let ptr = match *self {
+                Source::Borrowed(ptr, _) => &*ptr.as_ptr(),
+                Source::Owned(ref source, _, _) => source,
+            };
+
+            assert!(!ptr.p_ip_address.is_null());
+            ffi::CStr::from_ptr(ptr.p_ip_address).to_str().unwrap()
+        }
+    }
+
+    fn ndi_name_ptr(&self) -> *const ::std::os::raw::c_char {
+        unsafe {
+            match *self {
+                Source::Borrowed(ptr, _) => ptr.as_ref().p_ndi_name,
+                Source::Owned(_, ref ndi_name, _) => ndi_name.as_ptr(),
+            }
+        }
+    }
+
+    fn ip_address_ptr(&self) -> *const ::std::os::raw::c_char {
+        unsafe {
+            match *self {
+                Source::Borrowed(ptr, _) => ptr.as_ref().p_ip_address,
+                Source::Owned(_, _, ref ip_address) => ip_address.as_ptr(),
+            }
+        }
+    }
+
+    pub fn to_owned<'b>(&self) -> Source<'b> {
+        unsafe {
+            let (ndi_name, ip_address) = match *self {
+                Source::Borrowed(ptr, _) => (ptr.as_ref().p_ndi_name, ptr.as_ref().p_ip_address),
+                Source::Owned(_, ref ndi_name, ref ip_address) => {
+                    (ndi_name.as_ptr(), ip_address.as_ptr())
+                }
+            };
+
+            let ndi_name = ffi::CString::new(ffi::CStr::from_ptr(ndi_name).to_bytes()).unwrap();
+            let ip_address = ffi::CString::new(ffi::CStr::from_ptr(ip_address).to_bytes()).unwrap();
+
+            Source::Owned(
+                NDIlib_source_t {
+                    p_ndi_name: ndi_name.as_ptr(),
+                    p_ip_address: ip_address.as_ptr(),
+                },
+                ndi_name,
+                ip_address,
+            )
         }
     }
 }
@@ -171,8 +221,8 @@ impl<'a> RecvBuilder<'a> {
             let ndi_name = ffi::CString::new(self.ndi_name).unwrap();
             let ptr = NDIlib_recv_create_v3(&NDIlib_recv_create_v3_t {
                 source_to_connect_to: NDIlib_source_t {
-                    p_ndi_name: self.source_to_connect_to.0.as_ref().p_ndi_name,
-                    p_ip_address: self.source_to_connect_to.0.as_ref().p_ip_address,
+                    p_ndi_name: self.source_to_connect_to.ndi_name_ptr(),
+                    p_ip_address: self.source_to_connect_to.ip_address_ptr(),
                 },
                 allow_video_fields: self.allow_video_fields,
                 bandwidth: self.bandwidth,
@@ -198,7 +248,7 @@ impl RecvInstance {
         RecvBuilder {
             source_to_connect_to,
             allow_video_fields: true,
-            bandwidth: NDIlib_recv_bandwidth_e::NDIlib_recv_bandwidth_highest,
+            bandwidth: NDIlib_recv_bandwidth_highest,
             color_format: NDIlib_recv_color_format_e::NDIlib_recv_color_format_UYVY_BGRA,
             ndi_name,
         }

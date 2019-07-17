@@ -16,12 +16,12 @@ gst-inspect-1.0 ndivideosrc
 gst-inspect-1.0 ndiaudiosrc
 
 #Video pipeline
-gst-launch-1.0 ndivideosrc stream-name="GC-DEV2 (OBS)" ! autovideosink
+gst-launch-1.0 ndivideosrc ndi-name="GC-DEV2 (OBS)" ! autovideosink
 #Audio pipeline
-gst-launch-1.0 ndiaudiosrc stream-name="GC-DEV2 (OBS)" ! autoaudiosink
+gst-launch-1.0 ndiaudiosrc ndi-name="GC-DEV2 (OBS)" ! autoaudiosink
 
 #Video and audio pipeline
-gst-launch-1.0 ndivideosrc stream-name="GC-DEV2 (OBS)" ! autovideosink ndiaudiosrc stream-name="GC-DEV2 (OBS)" ! autoaudiosink
+gst-launch-1.0 ndivideosrc ndi-name="GC-DEV2 (OBS)" ! autovideosink ndiaudiosrc ndi-name="GC-DEV2 (OBS)" ! autoaudiosink
 ```
 
 Feel free to contribute to this project. Some ways you can contribute are:
@@ -63,11 +63,8 @@ gst-inspect-1.0 ndi
 
 More info about GStreamer plugins written in Rust:
 ----------------------------------
-https://github.com/sdroege/gstreamer-rs
-https://github.com/sdroege/gst-plugin-rs
-
-https://coaxion.net/blog/2018/01/how-to-write-gstreamer-elements-in-rust-part-1-a-video-filter-for-converting-rgb-to-grayscale/
-https://coaxion.net/blog/2018/02/how-to-write-gstreamer-elements-in-rust-part-2-a-raw-audio-sine-wave-source/
+https://gitlab.freedesktop.org/gstreamer/gstreamer-rs
+https://gitlab.freedesktop.org/gstreamer/gst-plugins-rs
 
 
 License

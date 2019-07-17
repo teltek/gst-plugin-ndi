@@ -12,6 +12,7 @@ use gst_video;
 use gst_video::prelude::*;
 
 use std::sync::Mutex;
+use std::time;
 use std::{i32, u32};
 
 use ndi::*;
@@ -21,6 +22,7 @@ use connect_ndi;
 use stop_ndi;
 
 use TimestampMode;
+use DEFAULT_RECEIVER_NDI_NAME;
 use HASHMAP_RECEIVERS;
 #[cfg(feature = "reference-timestamps")]
 use TIMECODE_CAPS;
@@ -29,50 +31,87 @@ use TIMESTAMP_CAPS;
 
 #[derive(Debug, Clone)]
 struct Settings {
-    stream_name: String,
-    ip: String,
-    loss_threshold: u32,
+    ndi_name: Option<String>,
+    ip_address: Option<String>,
+    connect_timeout: u32,
+    timeout: u32,
+    receiver_ndi_name: String,
+    bandwidth: ndisys::NDIlib_recv_bandwidth_e,
     timestamp_mode: TimestampMode,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            stream_name: String::from("Fixed ndi stream name"),
-            ip: String::from(""),
-            loss_threshold: 5,
+            ndi_name: None,
+            ip_address: None,
+            receiver_ndi_name: DEFAULT_RECEIVER_NDI_NAME.clone(),
+            connect_timeout: 10000,
+            timeout: 5000,
+            bandwidth: ndisys::NDIlib_recv_bandwidth_highest,
             timestamp_mode: TimestampMode::ReceiveTime,
         }
     }
 }
 
-static PROPERTIES: [subclass::Property; 4] = [
-    subclass::Property("stream-name", |name| {
+static PROPERTIES: [subclass::Property; 7] = [
+    subclass::Property("ndi-name", |name| {
         glib::ParamSpec::string(
             name,
-            "Stream Name",
-            "Name of the streaming device",
+            "NDI Name",
+            "NDI stream name of the sender",
             None,
             glib::ParamFlags::READWRITE,
         )
     }),
-    subclass::Property("ip", |name| {
+    subclass::Property("ip-address", |name| {
         glib::ParamSpec::string(
             name,
-            "Stream IP",
-            "IP of the streaming device. Ex: 127.0.0.1:5961",
+            "IP Address",
+            "IP address and port of the sender, e.g. 127.0.0.1:5961",
             None,
             glib::ParamFlags::READWRITE,
         )
     }),
-    subclass::Property("loss-threshold", |name| {
+    subclass::Property("receiver-ndi-name", |name| {
+        glib::ParamSpec::string(
+            name,
+            "Receiver NDI Name",
+            "NDI stream name of this receiver",
+            Some(&*DEFAULT_RECEIVER_NDI_NAME),
+            glib::ParamFlags::READWRITE,
+        )
+    }),
+    subclass::Property("connect-timeout", |name| {
         glib::ParamSpec::uint(
             name,
-            "Loss threshold",
-            "Loss threshold",
+            "Connect Timeout",
+            "Connection timeout in ms",
             0,
-            60,
-            5,
+            u32::MAX,
+            10000,
+            glib::ParamFlags::READWRITE,
+        )
+    }),
+    subclass::Property("timeout", |name| {
+        glib::ParamSpec::uint(
+            name,
+            "Timeout",
+            "Receive timeout in ms",
+            0,
+            u32::MAX,
+            5000,
+            glib::ParamFlags::READWRITE,
+        )
+    }),
+    subclass::Property("bandwidth", |name| {
+        glib::ParamSpec::int(
+            name,
+            "Bandwidth",
+            "Bandwidth, -10 metadata-only, 10 audio-only, 100 highest",
+            -10,
+            100,
+            100,
             glib::ParamFlags::READWRITE,
         )
     }),
@@ -135,7 +174,7 @@ impl ObjectSubclass for NdiVideoSrc {
             "NewTek NDI Video Source",
             "Source",
             "NewTek NDI video source",
-            "Ruben Gonzalez <rubenrua@teltek.es>, Daniel Vilar <daniel.peiteado@teltek.es>",
+            "Ruben Gonzalez <rubenrua@teltek.es>, Daniel Vilar <daniel.peiteado@teltek.es>, Sebastian Dröge <sebastian@centricular.com>",
         );
 
         // On the src pad, we can produce F32/F64 with any sample rate
@@ -216,41 +255,78 @@ impl ObjectImpl for NdiVideoSrc {
         let basesrc = obj.downcast_ref::<gst_base::BaseSrc>().unwrap();
 
         match *prop {
-            subclass::Property("stream-name", ..) => {
+            subclass::Property("ndi-name", ..) => {
                 let mut settings = self.settings.lock().unwrap();
-                let stream_name = value.get().unwrap();
+                let ndi_name = value.get();
                 gst_debug!(
                     self.cat,
                     obj: basesrc,
-                    "Changing stream-name from {} to {}",
-                    settings.stream_name,
-                    stream_name
+                    "Changing ndi-name from {:?} to {:?}",
+                    settings.ndi_name,
+                    ndi_name,
                 );
-                settings.stream_name = stream_name;
+                settings.ndi_name = ndi_name;
             }
-            subclass::Property("ip", ..) => {
+            subclass::Property("ip-address", ..) => {
                 let mut settings = self.settings.lock().unwrap();
-                let ip = value.get().unwrap();
+                let ip_address = value.get();
                 gst_debug!(
                     self.cat,
                     obj: basesrc,
-                    "Changing ip from {} to {}",
-                    settings.ip,
-                    ip
+                    "Changing ip from {:?} to {:?}",
+                    settings.ip_address,
+                    ip_address,
                 );
-                settings.ip = ip;
+                settings.ip_address = ip_address;
             }
-            subclass::Property("loss-threshold", ..) => {
+            subclass::Property("receiver-ndi-name", ..) => {
                 let mut settings = self.settings.lock().unwrap();
-                let loss_threshold = value.get().unwrap();
+                let receiver_ndi_name = value.get();
                 gst_debug!(
                     self.cat,
                     obj: basesrc,
-                    "Changing loss threshold from {} to {}",
-                    settings.loss_threshold,
-                    loss_threshold
+                    "Changing receiver-ndi-name from {:?} to {:?}",
+                    settings.receiver_ndi_name,
+                    receiver_ndi_name,
                 );
-                settings.loss_threshold = loss_threshold;
+                settings.receiver_ndi_name =
+                    receiver_ndi_name.unwrap_or_else(|| DEFAULT_RECEIVER_NDI_NAME.clone());
+            }
+            subclass::Property("connect-timeout", ..) => {
+                let mut settings = self.settings.lock().unwrap();
+                let connect_timeout = value.get().unwrap();
+                gst_debug!(
+                    self.cat,
+                    obj: basesrc,
+                    "Changing connect-timeout from {} to {}",
+                    settings.connect_timeout,
+                    connect_timeout,
+                );
+                settings.connect_timeout = connect_timeout;
+            }
+            subclass::Property("timeout", ..) => {
+                let mut settings = self.settings.lock().unwrap();
+                let timeout = value.get().unwrap();
+                gst_debug!(
+                    self.cat,
+                    obj: basesrc,
+                    "Changing timeout from {} to {}",
+                    settings.timeout,
+                    timeout,
+                );
+                settings.timeout = timeout;
+            }
+            subclass::Property("bandwidth", ..) => {
+                let mut settings = self.settings.lock().unwrap();
+                let bandwidth = value.get().unwrap();
+                gst_debug!(
+                    self.cat,
+                    obj: basesrc,
+                    "Changing bandwidth from {} to {}",
+                    settings.bandwidth,
+                    bandwidth,
+                );
+                settings.bandwidth = bandwidth;
             }
             subclass::Property("timestamp-mode", ..) => {
                 let mut settings = self.settings.lock().unwrap();
@@ -276,17 +352,29 @@ impl ObjectImpl for NdiVideoSrc {
         let prop = &PROPERTIES[id];
 
         match *prop {
-            subclass::Property("stream-name", ..) => {
+            subclass::Property("ndi-name", ..) => {
                 let settings = self.settings.lock().unwrap();
-                Ok(settings.stream_name.to_value())
+                Ok(settings.ndi_name.to_value())
             }
-            subclass::Property("ip", ..) => {
+            subclass::Property("ip-address", ..) => {
                 let settings = self.settings.lock().unwrap();
-                Ok(settings.ip.to_value())
+                Ok(settings.ip_address.to_value())
             }
-            subclass::Property("loss-threshold", ..) => {
+            subclass::Property("receiver-ndi-name", ..) => {
                 let settings = self.settings.lock().unwrap();
-                Ok(settings.loss_threshold.to_value())
+                Ok(settings.receiver_ndi_name.to_value())
+            }
+            subclass::Property("connect-timeout", ..) => {
+                let settings = self.settings.lock().unwrap();
+                Ok(settings.connect_timeout.to_value())
+            }
+            subclass::Property("timeout", ..) => {
+                let settings = self.settings.lock().unwrap();
+                Ok(settings.timeout.to_value())
+            }
+            subclass::Property("bandwidth", ..) => {
+                let settings = self.settings.lock().unwrap();
+                Ok(settings.bandwidth.to_value())
             }
             subclass::Property("timestamp-mode", ..) => {
                 let settings = self.settings.lock().unwrap();
@@ -304,7 +392,23 @@ impl BaseSrcImpl for NdiVideoSrc {
         *self.state.lock().unwrap() = Default::default();
         let mut state = self.state.lock().unwrap();
         let settings = self.settings.lock().unwrap().clone();
-        state.id_receiver = connect_ndi(self.cat, element, &settings.ip, &settings.stream_name);
+
+        if settings.ip_address.is_none() && settings.ndi_name.is_none() {
+            return Err(gst_error_msg!(
+                gst::LibraryError::Settings,
+                ["No IP address or NDI name given"]
+            ));
+        }
+
+        state.id_receiver = connect_ndi(
+            self.cat,
+            element,
+            settings.ip_address.as_ref().map(String::as_str),
+            settings.ndi_name.as_ref().map(String::as_str),
+            &settings.receiver_ndi_name,
+            settings.connect_timeout,
+            settings.bandwidth,
+        );
 
         // settings.id_receiver exists
         match state.id_receiver {
@@ -390,11 +494,11 @@ impl BaseSrcImpl for NdiVideoSrc {
 
         let clock = element.get_clock().unwrap();
 
-        let mut count_frame_none = 0;
+        let timeout = time::Instant::now();
         let video_frame = loop {
             // FIXME: make interruptable
             let res = loop {
-                match recv.capture(true, false, false, 1000) {
+                match recv.capture(true, false, false, 50) {
                     Err(_) => break Err(()),
                     Ok(None) => break Ok(None),
                     Ok(Some(Frame::Video(frame))) => break Ok(Some(frame)),
@@ -407,17 +511,11 @@ impl BaseSrcImpl for NdiVideoSrc {
                     gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type error received, assuming that the source closed the stream...."]);
                     return Err(gst::FlowError::Error);
                 }
-                Ok(None) if settings.loss_threshold != 0 => {
-                    if count_frame_none < settings.loss_threshold {
-                        count_frame_none += 1;
-                        continue;
-                    }
-                    gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type none received, assuming that the source closed the stream...."]);
-                    return Err(gst::FlowError::Error);
+                Ok(None) if timeout.elapsed().as_millis() >= settings.timeout as u128 => {
+                    return Err(gst::FlowError::Eos);
                 }
                 Ok(None) => {
-                    gst_debug!(self.cat, obj: element, "No video frame received, retry");
-                    count_frame_none += 1;
+                    gst_debug!(self.cat, obj: element, "No video frame received yet, retry");
                     continue;
                 }
                 Ok(Some(frame)) => frame,
