@@ -281,6 +281,15 @@ impl RecvInstance {
         }
     }
 
+    pub fn get_queue(&self) -> Queue {
+        unsafe {
+            let _lock = (self.0).1.lock().unwrap();
+            let mut queue = mem::MaybeUninit::uninit();
+            NDIlib_recv_get_queue(((self.0).0).0.as_ptr(), queue.as_mut_ptr());
+            Queue(queue.assume_init())
+        }
+    }
+
     pub fn capture(
         &self,
         video: bool,
@@ -490,7 +499,7 @@ impl<'a> VideoFrame<'a> {
 impl<'a> Drop for VideoFrame<'a> {
     #[allow(irrefutable_let_patterns)]
     fn drop(&mut self) {
-        if let VideoFrame::Borrowed(ref frame, ref recv) = *self {
+        if let VideoFrame::Borrowed(ref mut frame, ref recv) = *self {
             unsafe {
                 NDIlib_recv_free_video_v2(((recv.0).0).0.as_ptr() as *mut _, frame);
             }
@@ -597,7 +606,7 @@ impl<'a> AudioFrame<'a> {
 impl<'a> Drop for AudioFrame<'a> {
     #[allow(irrefutable_let_patterns)]
     fn drop(&mut self) {
-        if let AudioFrame::Borrowed(ref frame, ref recv) = *self {
+        if let AudioFrame::Borrowed(ref mut frame, ref recv) = *self {
             unsafe {
                 NDIlib_recv_free_audio_v2(((recv.0).0).0.as_ptr() as *mut _, frame);
             }
@@ -689,10 +698,25 @@ impl<'a> Default for MetadataFrame<'a> {
 
 impl<'a> Drop for MetadataFrame<'a> {
     fn drop(&mut self) {
-        if let MetadataFrame::Borrowed(ref frame, ref recv) = *self {
+        if let MetadataFrame::Borrowed(ref mut frame, ref recv) = *self {
             unsafe {
                 NDIlib_recv_free_metadata(((recv.0).0).0.as_ptr() as *mut _, frame);
             }
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Queue(NDIlib_recv_queue_t);
+
+impl Queue {
+    pub fn audio_frames(&self) -> i32 {
+        self.0.audio_frames
+    }
+    pub fn video_frames(&self) -> i32 {
+        self.0.video_frames
+    }
+    pub fn metadata_frames(&self) -> i32 {
+        self.0.metadata_frames
     }
 }

@@ -41,22 +41,26 @@ extern "C" {
     ) -> bool;
     pub fn NDIlib_recv_capture_v2(
         p_instance: NDIlib_recv_instance_t,
-        p_video_data: *const NDIlib_video_frame_v2_t,
-        p_audio_data: *const NDIlib_audio_frame_v2_t,
-        p_metadata: *const NDIlib_metadata_frame_t,
+        p_video_data: *mut NDIlib_video_frame_v2_t,
+        p_audio_data: *mut NDIlib_audio_frame_v2_t,
+        p_metadata: *mut NDIlib_metadata_frame_t,
         timeout_in_ms: u32,
     ) -> NDIlib_frame_type_e;
     pub fn NDIlib_recv_free_video_v2(
         p_instance: NDIlib_recv_instance_t,
-        p_video_data: *const NDIlib_video_frame_v2_t,
+        p_video_data: *mut NDIlib_video_frame_v2_t,
     );
     pub fn NDIlib_recv_free_audio_v2(
         p_instance: NDIlib_recv_instance_t,
-        p_audio_data: *const NDIlib_audio_frame_v2_t,
+        p_audio_data: *mut NDIlib_audio_frame_v2_t,
     );
     pub fn NDIlib_recv_free_metadata(
         p_instance: NDIlib_recv_instance_t,
-        p_metadata: *const NDIlib_metadata_frame_t,
+        p_metadata: *mut NDIlib_metadata_frame_t,
+    );
+    pub fn NDIlib_recv_get_queue(
+        p_instance: NDIlib_recv_instance_t,
+        p_total: *mut NDIlib_recv_queue_t,
     );
 }
 
@@ -149,6 +153,14 @@ pub type NDIlib_recv_instance_t = *mut ::std::os::raw::c_void;
 pub struct NDIlib_tally_t {
     pub on_program: bool,
     pub on_preview: bool,
+}
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct NDIlib_recv_queue_t {
+    pub video_frames: i32,
+    pub audio_frames: i32,
+    pub metadata_frames: i32,
 }
 
 #[repr(C)]

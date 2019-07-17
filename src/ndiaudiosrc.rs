@@ -10,24 +10,16 @@ use gst_base::prelude::*;
 use gst_base::subclass::prelude::*;
 
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time;
 use std::{i32, u32};
 
 use connect_ndi;
-use ndi::*;
 use ndisys;
-use stop_ndi;
 
+use Receiver;
+use ReceiverControlHandle;
+use ReceiverItem;
 use TimestampMode;
 use DEFAULT_RECEIVER_NDI_NAME;
-use HASHMAP_RECEIVERS;
-#[cfg(feature = "reference-timestamps")]
-use TIMECODE_CAPS;
-#[cfg(feature = "reference-timestamps")]
-use TIMESTAMP_CAPS;
-
-use byte_slice_cast::AsMutSliceOf;
 
 #[derive(Debug, Clone)]
 struct Settings {
@@ -129,7 +121,7 @@ static PROPERTIES: [subclass::Property; 7] = [
 
 struct State {
     info: Option<gst_audio::AudioInfo>,
-    id_receiver: Option<usize>,
+    receiver: Option<Receiver>,
     current_latency: gst::ClockTime,
 }
 
@@ -137,7 +129,7 @@ impl Default for State {
     fn default() -> State {
         State {
             info: None,
-            id_receiver: None,
+            receiver: None,
             current_latency: gst::CLOCK_TIME_NONE,
         }
     }
@@ -147,7 +139,7 @@ pub(crate) struct NdiAudioSrc {
     cat: gst::DebugCategory,
     settings: Mutex<Settings>,
     state: Mutex<State>,
-    unlock: AtomicBool,
+    receiver_controller: Mutex<Option<ReceiverControlHandle>>,
 }
 
 impl ObjectSubclass for NdiAudioSrc {
@@ -167,7 +159,7 @@ impl ObjectSubclass for NdiAudioSrc {
             ),
             settings: Mutex::new(Default::default()),
             state: Mutex::new(Default::default()),
-            unlock: AtomicBool::new(false),
+            receiver_controller: Mutex::new(None),
         }
     }
 
@@ -353,26 +345,52 @@ impl ObjectImpl for NdiAudioSrc {
     }
 }
 
-impl ElementImpl for NdiAudioSrc {}
+impl ElementImpl for NdiAudioSrc {
+    fn change_state(
+        &self,
+        element: &gst::Element,
+        transition: gst::StateChange,
+    ) -> Result<gst::StateChangeSuccess, gst::StateChangeError> {
+        match transition {
+            gst::StateChange::PausedToPlaying => {
+                if let Some(ref controller) = *self.receiver_controller.lock().unwrap() {
+                    controller.set_playing(true);
+                }
+            }
+            gst::StateChange::PlayingToPaused => {
+                if let Some(ref controller) = *self.receiver_controller.lock().unwrap() {
+                    controller.set_playing(false);
+                }
+            }
+            gst::StateChange::PausedToReady => {
+                if let Some(ref controller) = *self.receiver_controller.lock().unwrap() {
+                    controller.shutdown();
+                }
+            }
+            _ => (),
+        }
+
+        self.parent_change_state(element, transition)
+    }
+}
 
 impl BaseSrcImpl for NdiAudioSrc {
     fn unlock(&self, element: &gst_base::BaseSrc) -> std::result::Result<(), gst::ErrorMessage> {
-        gst_debug!(
-            self.cat,
-            obj: element,
-            "Unlocking",
-        );
-        self.unlock.store(true, Ordering::SeqCst);
+        gst_debug!(self.cat, obj: element, "Unlocking",);
+        if let Some(ref controller) = *self.receiver_controller.lock().unwrap() {
+            controller.set_flushing(true);
+        }
         Ok(())
     }
 
-    fn unlock_stop(&self, element: &gst_base::BaseSrc) -> std::result::Result<(), gst::ErrorMessage> {
-        gst_debug!(
-            self.cat,
-            obj: element,
-            "Stop unlocking",
-        );
-        self.unlock.store(false, Ordering::SeqCst);
+    fn unlock_stop(
+        &self,
+        element: &gst_base::BaseSrc,
+    ) -> std::result::Result<(), gst::ErrorMessage> {
+        gst_debug!(self.cat, obj: element, "Stop unlocking",);
+        if let Some(ref controller) = *self.receiver_controller.lock().unwrap() {
+            controller.set_flushing(false);
+        }
         Ok(())
     }
 
@@ -387,7 +405,7 @@ impl BaseSrcImpl for NdiAudioSrc {
             ));
         }
 
-        let id_receiver = connect_ndi(
+        let receiver = connect_ndi(
             self.cat,
             element,
             settings.ip_address.as_ref().map(String::as_str),
@@ -395,33 +413,32 @@ impl BaseSrcImpl for NdiAudioSrc {
             &settings.receiver_ndi_name,
             settings.connect_timeout,
             settings.bandwidth,
-            &self.unlock,
+            settings.timestamp_mode,
+            settings.timeout,
         );
 
         // settings.id_receiver exists
-        match id_receiver {
-            None if self.unlock.load(Ordering::SeqCst) => Ok(()),
+        match receiver {
             None => Err(gst_error_msg!(
                 gst::ResourceError::NotFound,
                 ["Could not connect to this source"]
             )),
-            Some(id_receiver) => {
+            Some(receiver) => {
+                *self.receiver_controller.lock().unwrap() =
+                    Some(receiver.receiver_control_handle());
                 let mut state = self.state.lock().unwrap();
-                state.id_receiver = Some(id_receiver);
+                state.receiver = Some(receiver);
 
                 Ok(())
             }
         }
     }
 
-    fn stop(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
-        *self.state.lock().unwrap() = Default::default();
-
-        let mut state = self.state.lock().unwrap();
-        if let Some(id_receiver) = state.id_receiver.take() {
-            stop_ndi(self.cat, element, id_receiver);
+    fn stop(&self, _element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
+        if let Some(ref controller) = self.receiver_controller.lock().unwrap().take() {
+            controller.shutdown();
         }
-        *state = State::default();
+        *self.state.lock().unwrap() = State::default();
         Ok(())
     }
 
@@ -474,210 +491,42 @@ impl BaseSrcImpl for NdiAudioSrc {
         _offset: u64,
         _length: u32,
     ) -> Result<gst::Buffer, gst::FlowError> {
-        self.capture(element)
-    }
-}
-
-impl NdiAudioSrc {
-    fn capture(&self, element: &gst_base::BaseSrc) -> Result<gst::Buffer, gst::FlowError> {
-        let settings = self.settings.lock().unwrap().clone();
-
         let recv = {
-            let state = self.state.lock().unwrap();
-            let receivers = HASHMAP_RECEIVERS.lock().unwrap();
-            let receiver = &receivers.get(&state.id_receiver.unwrap()).unwrap();
-            receiver.ndi_instance.clone()
-        };
-
-        let timeout = time::Instant::now();
-        let audio_frame = loop {
-            // FIXME: make interruptable
-            let res = loop {
-                match recv.capture(false, true, false, 50) {
-                    Err(_) => break Err(()),
-                    Ok(None) => break Ok(None),
-                    Ok(Some(Frame::Audio(frame))) => break Ok(Some(frame)),
-                    _ => unreachable!(),
-                }
-            };
-
-            let audio_frame = match res {
-                Err(_) => {
-                    gst_element_error!(element, gst::ResourceError::Read, ["NDI frame type error received, assuming that the source closed the stream...."]);
+            let mut state = self.state.lock().unwrap();
+            match state.receiver.take() {
+                Some(recv) => recv,
+                None => {
+                    gst_error!(self.cat, obj: element, "Have no receiver");
                     return Err(gst::FlowError::Error);
                 }
-                Ok(None) if timeout.elapsed().as_millis() >= settings.timeout as u128 => {
-                    return Err(gst::FlowError::Eos);
-                }
-                Ok(None) => {
-                    gst_debug!(self.cat, obj: element, "No audio frame received yet, retry");
-                    continue;
-                }
-                Ok(Some(frame)) => frame,
-            };
-
-            break audio_frame;
+            }
         };
 
-        let pts = self.calculate_timestamp(element, &settings, &audio_frame);
-        let info = self.create_audio_info(element, &audio_frame)?;
+        match recv.capture() {
+            ReceiverItem::AudioBuffer(buffer, info) => {
+                let mut state = self.state.lock().unwrap();
+                state.receiver = Some(recv);
+                if state.info.as_ref() != Some(&info) {
+                    let caps = info.to_caps().unwrap();
+                    state.info = Some(info.clone());
+                    state.current_latency = buffer.get_duration();
+                    drop(state);
+                    gst_debug!(self.cat, obj: element, "Configuring for caps {}", caps);
+                    element
+                        .set_caps(&caps)
+                        .map_err(|_| gst::FlowError::NotNegotiated)?;
 
-        {
-            let mut state = self.state.lock().unwrap();
-            if state.info.as_ref() != Some(&info) {
-                let caps = info.to_caps().unwrap();
-                state.info = Some(info.clone());
-                state.current_latency = gst::SECOND
-                    .mul_div_ceil(
-                        audio_frame.no_samples() as u64,
-                        audio_frame.sample_rate() as u64,
-                    )
-                    .unwrap_or(gst::CLOCK_TIME_NONE);
-                drop(state);
-                gst_debug!(self.cat, obj: element, "Configuring for caps {}", caps);
-                element
-                    .set_caps(&caps)
-                    .map_err(|_| gst::FlowError::NotNegotiated)?;
+                    let _ = element
+                        .post_message(&gst::Message::new_latency().src(Some(element)).build());
+                }
 
-                let _ =
-                    element.post_message(&gst::Message::new_latency().src(Some(element)).build());
+                Ok(buffer)
             }
+            ReceiverItem::Flushing => Err(gst::FlowError::Flushing),
+            ReceiverItem::Timeout => Err(gst::FlowError::Eos),
+            ReceiverItem::Error(err) => Err(err),
+            ReceiverItem::VideoBuffer(..) => unreachable!(),
         }
-
-        let buffer = self.create_buffer(element, pts, &info, &audio_frame)?;
-
-        gst_log!(self.cat, obj: element, "Produced buffer {:?}", buffer);
-
-        Ok(buffer)
-    }
-
-    fn calculate_timestamp(
-        &self,
-        element: &gst_base::BaseSrc,
-        settings: &Settings,
-        audio_frame: &AudioFrame,
-    ) -> gst::ClockTime {
-        let clock = element.get_clock().unwrap();
-
-        // For now take the current running time as PTS. At a later time we
-        // will want to work with the timestamp given by the NDI SDK if available
-        let now = clock.get_time();
-        let base_time = element.get_base_time();
-        let receive_time = now - base_time;
-
-        let real_time_now = gst::ClockTime::from(glib::get_real_time() as u64 * 1000);
-        let timestamp = if audio_frame.timestamp() == ndisys::NDIlib_recv_timestamp_undefined {
-            gst::CLOCK_TIME_NONE
-        } else {
-            gst::ClockTime::from(audio_frame.timestamp() as u64 * 100)
-        };
-        let timecode = gst::ClockTime::from(audio_frame.timecode() as u64 * 100);
-
-        gst_log!(
-            self.cat,
-            obj: element,
-            "NDI audio frame received: {:?} with timecode {} and timestamp {}, receive time {}, local time now {}",
-            audio_frame,
-            timecode,
-            timestamp,
-            receive_time,
-            real_time_now,
-        );
-
-        let pts = match settings.timestamp_mode {
-            TimestampMode::ReceiveTime => receive_time,
-            TimestampMode::Timecode => timecode,
-            TimestampMode::Timestamp if timestamp.is_none() => receive_time,
-            TimestampMode::Timestamp => {
-                // Timestamps are relative to the UNIX epoch
-                if real_time_now > timestamp {
-                    let diff = real_time_now - timestamp;
-                    if diff > receive_time {
-                        0.into()
-                    } else {
-                        receive_time - diff
-                    }
-                } else {
-                    let diff = timestamp - real_time_now;
-                    receive_time + diff
-                }
-            }
-        };
-
-        gst_log!(
-            self.cat,
-            obj: element,
-            "Calculated pts for audio frame: {:?}",
-            pts
-        );
-
-        pts
-    }
-
-    fn create_audio_info(
-        &self,
-        _element: &gst_base::BaseSrc,
-        audio_frame: &AudioFrame,
-    ) -> Result<gst_audio::AudioInfo, gst::FlowError> {
-        let builder = gst_audio::AudioInfo::new(
-            gst_audio::AUDIO_FORMAT_S16,
-            audio_frame.sample_rate() as u32,
-            audio_frame.no_channels() as u32,
-        );
-
-        Ok(builder.build().unwrap())
-    }
-
-    fn create_buffer(
-        &self,
-        _element: &gst_base::BaseSrc,
-        pts: gst::ClockTime,
-        info: &gst_audio::AudioInfo,
-        audio_frame: &AudioFrame,
-    ) -> Result<gst::Buffer, gst::FlowError> {
-        // We multiply by 2 because is the size in bytes of an i16 variable
-        let buff_size = (audio_frame.no_samples() as u32 * info.bpf()) as usize;
-        let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
-        {
-            let duration = gst::SECOND
-                .mul_div_floor(
-                    audio_frame.no_samples() as u64,
-                    audio_frame.sample_rate() as u64,
-                )
-                .unwrap_or(gst::CLOCK_TIME_NONE);
-            let buffer = buffer.get_mut().unwrap();
-
-            buffer.set_pts(pts);
-            buffer.set_duration(duration);
-
-            #[cfg(feature = "reference-timestamps")]
-            {
-                gst::ReferenceTimestampMeta::add(
-                    buffer,
-                    &*TIMECODE_CAPS,
-                    gst::ClockTime::from(audio_frame.timecode() as u64 * 100),
-                    gst::CLOCK_TIME_NONE,
-                );
-                if audio_frame.timestamp() != ndisys::NDIlib_recv_timestamp_undefined {
-                    gst::ReferenceTimestampMeta::add(
-                        buffer,
-                        &*TIMESTAMP_CAPS,
-                        gst::ClockTime::from(audio_frame.timestamp() as u64 * 100),
-                        gst::CLOCK_TIME_NONE,
-                    );
-                }
-            }
-
-            audio_frame.copy_to_interleaved_16s(
-                buffer
-                    .map_writable()
-                    .unwrap()
-                    .as_mut_slice_of::<i16>()
-                    .unwrap(),
-            );
-        }
-
-        Ok(buffer)
     }
 }
 
