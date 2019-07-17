@@ -2,6 +2,7 @@ use ndisys::*;
 use std::ffi;
 use std::mem;
 use std::ptr;
+use std::sync::{Arc, Mutex};
 
 pub fn initialize() -> bool {
     unsafe { NDIlib_initialize() }
@@ -233,15 +234,27 @@ impl<'a> RecvBuilder<'a> {
             if ptr.is_null() {
                 None
             } else {
-                Some(RecvInstance(ptr::NonNull::new_unchecked(ptr)))
+                Some(RecvInstance(Arc::new((
+                    RecvInstanceInner(ptr::NonNull::new_unchecked(ptr)),
+                    Mutex::new(()),
+                ))))
             }
         }
     }
 }
 
+// Any access to the RecvInstanceInner apart from calling the capture function must be protected by
+// the mutex
+#[derive(Debug, Clone)]
+pub struct RecvInstance(Arc<(RecvInstanceInner, Mutex<()>)>);
+
 #[derive(Debug)]
-pub struct RecvInstance(ptr::NonNull<::std::os::raw::c_void>);
-unsafe impl Send for RecvInstance {}
+struct RecvInstanceInner(ptr::NonNull<::std::os::raw::c_void>);
+unsafe impl Send for RecvInstanceInner {}
+
+// Not 100% true but we ensure safety with the mutex. The documentation says that only the
+// capturing itself can be performed from multiple threads at once safely.
+unsafe impl Sync for RecvInstanceInner {}
 
 impl RecvInstance {
     pub fn builder<'a>(source_to_connect_to: &'a Source, ndi_name: &'a str) -> RecvBuilder<'a> {
@@ -255,11 +268,17 @@ impl RecvInstance {
     }
 
     pub fn set_tally(&self, tally: &Tally) -> bool {
-        unsafe { NDIlib_recv_set_tally(self.0.as_ptr(), &tally.0) }
+        unsafe {
+            let _lock = (self.0).1.lock().unwrap();
+            NDIlib_recv_set_tally(((self.0).0).0.as_ptr(), &tally.0)
+        }
     }
 
     pub fn send_metadata(&self, metadata: &MetadataFrame) -> bool {
-        unsafe { NDIlib_recv_send_metadata(self.0.as_ptr(), metadata.as_ptr()) }
+        unsafe {
+            let _lock = (self.0).1.lock().unwrap();
+            NDIlib_recv_send_metadata(((self.0).0).0.as_ptr(), metadata.as_ptr())
+        }
     }
 
     pub fn capture(
@@ -270,12 +289,15 @@ impl RecvInstance {
         timeout_in_ms: u32,
     ) -> Result<Option<Frame>, ()> {
         unsafe {
+            // Capturing from multiple threads at once is safe according to the documentation
+            let ptr = ((self.0).0).0.as_ptr();
+
             let mut video_frame = mem::zeroed();
             let mut audio_frame = mem::zeroed();
             let mut metadata_frame = mem::zeroed();
 
             let res = NDIlib_recv_capture_v2(
-                self.0.as_ptr(),
+                ptr,
                 if video {
                     &mut video_frame
                 } else {
@@ -317,7 +339,7 @@ impl RecvInstance {
     }
 }
 
-impl Drop for RecvInstance {
+impl Drop for RecvInstanceInner {
     fn drop(&mut self) {
         unsafe { NDIlib_recv_destroy(self.0.as_ptr() as *mut _) }
     }
@@ -470,7 +492,7 @@ impl<'a> Drop for VideoFrame<'a> {
     fn drop(&mut self) {
         if let VideoFrame::Borrowed(ref frame, ref recv) = *self {
             unsafe {
-                NDIlib_recv_free_video_v2(recv.0.as_ptr() as *mut _, frame);
+                NDIlib_recv_free_video_v2(((recv.0).0).0.as_ptr() as *mut _, frame);
             }
         }
     }
@@ -577,7 +599,7 @@ impl<'a> Drop for AudioFrame<'a> {
     fn drop(&mut self) {
         if let AudioFrame::Borrowed(ref frame, ref recv) = *self {
             unsafe {
-                NDIlib_recv_free_audio_v2(recv.0.as_ptr() as *mut _, frame);
+                NDIlib_recv_free_audio_v2(((recv.0).0).0.as_ptr() as *mut _, frame);
             }
         }
     }
@@ -669,7 +691,7 @@ impl<'a> Drop for MetadataFrame<'a> {
     fn drop(&mut self) {
         if let MetadataFrame::Borrowed(ref frame, ref recv) = *self {
             unsafe {
-                NDIlib_recv_free_metadata(recv.0.as_ptr() as *mut _, frame);
+                NDIlib_recv_free_metadata(((recv.0).0).0.as_ptr() as *mut _, frame);
             }
         }
     }
