@@ -10,6 +10,7 @@ use gst_base::prelude::*;
 use gst_base::subclass::prelude::*;
 
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time;
 use std::{i32, u32};
 
@@ -146,6 +147,7 @@ pub(crate) struct NdiAudioSrc {
     cat: gst::DebugCategory,
     settings: Mutex<Settings>,
     state: Mutex<State>,
+    unlock: AtomicBool,
 }
 
 impl ObjectSubclass for NdiAudioSrc {
@@ -165,6 +167,7 @@ impl ObjectSubclass for NdiAudioSrc {
             ),
             settings: Mutex::new(Default::default()),
             state: Mutex::new(Default::default()),
+            unlock: AtomicBool::new(false),
         }
     }
 
@@ -353,13 +356,38 @@ impl ObjectImpl for NdiAudioSrc {
 impl ElementImpl for NdiAudioSrc {}
 
 impl BaseSrcImpl for NdiAudioSrc {
+    fn unlock(&self, element: &gst_base::BaseSrc) -> std::result::Result<(), gst::ErrorMessage> {
+        gst_debug!(
+            self.cat,
+            obj: element,
+            "Unlocking",
+        );
+        self.unlock.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn unlock_stop(&self, element: &gst_base::BaseSrc) -> std::result::Result<(), gst::ErrorMessage> {
+        gst_debug!(
+            self.cat,
+            obj: element,
+            "Stop unlocking",
+        );
+        self.unlock.store(false, Ordering::SeqCst);
+        Ok(())
+    }
+
     fn start(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
         *self.state.lock().unwrap() = Default::default();
-
         let settings = self.settings.lock().unwrap().clone();
-        let mut state = self.state.lock().unwrap();
 
-        state.id_receiver = connect_ndi(
+        if settings.ip_address.is_none() && settings.ndi_name.is_none() {
+            return Err(gst_error_msg!(
+                gst::LibraryError::Settings,
+                ["No IP address or NDI name given"]
+            ));
+        }
+
+        let id_receiver = connect_ndi(
             self.cat,
             element,
             settings.ip_address.as_ref().map(String::as_str),
@@ -367,14 +395,22 @@ impl BaseSrcImpl for NdiAudioSrc {
             &settings.receiver_ndi_name,
             settings.connect_timeout,
             settings.bandwidth,
+            &self.unlock,
         );
 
-        match state.id_receiver {
+        // settings.id_receiver exists
+        match id_receiver {
+            None if self.unlock.load(Ordering::SeqCst) => Ok(()),
             None => Err(gst_error_msg!(
                 gst::ResourceError::NotFound,
                 ["Could not connect to this source"]
             )),
-            _ => Ok(()),
+            Some(id_receiver) => {
+                let mut state = self.state.lock().unwrap();
+                state.id_receiver = Some(id_receiver);
+
+                Ok(())
+            }
         }
     }
 

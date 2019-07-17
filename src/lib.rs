@@ -21,7 +21,7 @@ use ndi::*;
 use ndisys::*;
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time;
 
@@ -83,6 +83,7 @@ fn connect_ndi(
     receiver_ndi_name: &str,
     connect_timeout: u32,
     bandwidth: NDIlib_recv_bandwidth_e,
+    cancel: &AtomicBool,
 ) -> Option<usize> {
     gst_debug!(cat, obj: element, "Starting NDI connection...");
 
@@ -119,7 +120,17 @@ fn connect_ndi(
 
     let timeout = time::Instant::now();
     let source = loop {
+        if cancel.load(Ordering::SeqCst) {
+            gst_debug!(cat, obj: element, "Cancelled");
+            return None;
+        }
+
         find.wait_for_sources(50);
+
+        if cancel.load(Ordering::SeqCst) {
+            gst_debug!(cat, obj: element, "Cancelled");
+            return None;
+        }
 
         let sources = find.get_current_sources();
 

@@ -12,6 +12,7 @@ use gst_video;
 use gst_video::prelude::*;
 
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time;
 use std::{i32, u32};
 
@@ -147,6 +148,7 @@ pub(crate) struct NdiVideoSrc {
     cat: gst::DebugCategory,
     settings: Mutex<Settings>,
     state: Mutex<State>,
+    unlock: AtomicBool,
 }
 
 impl ObjectSubclass for NdiVideoSrc {
@@ -166,6 +168,7 @@ impl ObjectSubclass for NdiVideoSrc {
             ),
             settings: Mutex::new(Default::default()),
             state: Mutex::new(Default::default()),
+            unlock: AtomicBool::new(false),
         }
     }
 
@@ -385,12 +388,43 @@ impl ObjectImpl for NdiVideoSrc {
     }
 }
 
-impl ElementImpl for NdiVideoSrc {}
+impl ElementImpl for NdiVideoSrc {
+    fn change_state(&self, element: &gst::Element, transition: gst::StateChange) -> Result<gst::StateChangeSuccess, gst::StateChangeError> {
+        match transition {
+            gst::StateChange::ReadyToPaused => self.unlock.store(true, Ordering::SeqCst),
+            gst::StateChange::PausedToReady => self.unlock.store(false, Ordering::SeqCst),
+            _ => (),
+        }
+
+        self.parent_change_state(element, transition)
+    }
+}
 
 impl BaseSrcImpl for NdiVideoSrc {
+    fn unlock(&self, element: &gst_base::BaseSrc) -> std::result::Result<(), gst::ErrorMessage> {
+        gst_debug!(
+            self.cat,
+            obj: element,
+            "Unlocking",
+        );
+        self.unlock.store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    fn unlock_stop(&self, element: &gst_base::BaseSrc) -> std::result::Result<(), gst::ErrorMessage> {
+        gst_debug!(
+            self.cat,
+            obj: element,
+            "Stop unlocking",
+        );
+        self.unlock.store(false, Ordering::SeqCst);
+        Ok(())
+    }
+
     fn start(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
+        self.unlock.store(false, Ordering::SeqCst);
+
         *self.state.lock().unwrap() = Default::default();
-        let mut state = self.state.lock().unwrap();
         let settings = self.settings.lock().unwrap().clone();
 
         if settings.ip_address.is_none() && settings.ndi_name.is_none() {
@@ -400,7 +434,7 @@ impl BaseSrcImpl for NdiVideoSrc {
             ));
         }
 
-        state.id_receiver = connect_ndi(
+        let id_receiver = connect_ndi(
             self.cat,
             element,
             settings.ip_address.as_ref().map(String::as_str),
@@ -408,19 +442,28 @@ impl BaseSrcImpl for NdiVideoSrc {
             &settings.receiver_ndi_name,
             settings.connect_timeout,
             settings.bandwidth,
+            &self.unlock,
         );
 
         // settings.id_receiver exists
-        match state.id_receiver {
+        match id_receiver {
+            None if self.unlock.load(Ordering::SeqCst) => Ok(()),
             None => Err(gst_error_msg!(
                 gst::ResourceError::NotFound,
                 ["Could not connect to this source"]
             )),
-            _ => Ok(()),
+            Some(id_receiver) => {
+                let mut state = self.state.lock().unwrap();
+                state.id_receiver = Some(id_receiver);
+
+                Ok(())
+            }
         }
     }
 
     fn stop(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
+        self.unlock.store(true, Ordering::SeqCst);
+
         *self.state.lock().unwrap() = Default::default();
 
         let mut state = self.state.lock().unwrap();
