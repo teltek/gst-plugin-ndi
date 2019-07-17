@@ -438,15 +438,20 @@ impl BaseSrcImpl for NdiAudioSrc {
         _offset: u64,
         _length: u32,
     ) -> Result<gst::Buffer, gst::FlowError> {
-        // FIXME: Make sure to not have any mutexes locked while wait
+        self.capture(element)
+    }
+}
+
+impl NdiAudioSrc {
+    fn capture(&self, element: &gst_base::BaseSrc) -> Result<gst::Buffer, gst::FlowError> {
         let settings = self.settings.lock().unwrap().clone();
-        let mut state = self.state.lock().unwrap();
-        let receivers = HASHMAP_RECEIVERS.lock().unwrap();
 
-        let receiver = &receivers.get(&state.id_receiver.unwrap()).unwrap();
-        let recv = &receiver.ndi_instance;
-
-        let clock = element.get_clock().unwrap();
+        let recv = {
+            let state = self.state.lock().unwrap();
+            let receivers = HASHMAP_RECEIVERS.lock().unwrap();
+            let receiver = &receivers.get(&state.id_receiver.unwrap()).unwrap();
+            receiver.ndi_instance.clone()
+        };
 
         let timeout = time::Instant::now();
         let audio_frame = loop {
@@ -477,6 +482,46 @@ impl BaseSrcImpl for NdiAudioSrc {
 
             break audio_frame;
         };
+
+        let pts = self.calculate_timestamp(element, &settings, &audio_frame);
+        let info = self.create_audio_info(element, &audio_frame)?;
+
+        {
+            let mut state = self.state.lock().unwrap();
+            if state.info.as_ref() != Some(&info) {
+                let caps = info.to_caps().unwrap();
+                state.info = Some(info.clone());
+                state.current_latency = gst::SECOND
+                    .mul_div_ceil(
+                        audio_frame.no_samples() as u64,
+                        audio_frame.sample_rate() as u64,
+                    )
+                    .unwrap_or(gst::CLOCK_TIME_NONE);
+                drop(state);
+                gst_debug!(self.cat, obj: element, "Configuring for caps {}", caps);
+                element
+                    .set_caps(&caps)
+                    .map_err(|_| gst::FlowError::NotNegotiated)?;
+
+                let _ =
+                    element.post_message(&gst::Message::new_latency().src(Some(element)).build());
+            }
+        }
+
+        let buffer = self.create_buffer(element, pts, &info, &audio_frame)?;
+
+        gst_log!(self.cat, obj: element, "Produced buffer {:?}", buffer);
+
+        Ok(buffer)
+    }
+
+    fn calculate_timestamp(
+        &self,
+        element: &gst_base::BaseSrc,
+        settings: &Settings,
+        audio_frame: &AudioFrame,
+    ) -> gst::ClockTime {
+        let clock = element.get_clock().unwrap();
 
         // For now take the current running time as PTS. At a later time we
         // will want to work with the timestamp given by the NDI SDK if available
@@ -530,34 +575,32 @@ impl BaseSrcImpl for NdiAudioSrc {
             pts
         );
 
-        let info = gst_audio::AudioInfo::new(
+        pts
+    }
+
+    fn create_audio_info(
+        &self,
+        _element: &gst_base::BaseSrc,
+        audio_frame: &AudioFrame,
+    ) -> Result<gst_audio::AudioInfo, gst::FlowError> {
+        let builder = gst_audio::AudioInfo::new(
             gst_audio::AUDIO_FORMAT_S16,
             audio_frame.sample_rate() as u32,
             audio_frame.no_channels() as u32,
-        )
-        .build()
-        .unwrap();
+        );
 
-        if state.info.as_ref() != Some(&info) {
-            let caps = info.to_caps().unwrap();
-            state.info = Some(info);
-            state.current_latency = gst::SECOND
-                .mul_div_ceil(
-                    audio_frame.no_samples() as u64,
-                    audio_frame.sample_rate() as u64,
-                )
-                .unwrap_or(gst::CLOCK_TIME_NONE);
+        Ok(builder.build().unwrap())
+    }
 
-            gst_debug!(self.cat, obj: element, "Configuring for caps {}", caps);
-            element
-                .set_caps(&caps)
-                .map_err(|_| gst::FlowError::NotNegotiated)?;
-
-            let _ = element.post_message(&gst::Message::new_latency().src(Some(element)).build());
-        }
-
+    fn create_buffer(
+        &self,
+        _element: &gst_base::BaseSrc,
+        pts: gst::ClockTime,
+        info: &gst_audio::AudioInfo,
+        audio_frame: &AudioFrame,
+    ) -> Result<gst::Buffer, gst::FlowError> {
         // We multiply by 2 because is the size in bytes of an i16 variable
-        let buff_size = (audio_frame.no_samples() * 2 * audio_frame.no_channels()) as usize;
+        let buff_size = (audio_frame.no_samples() as u32 * info.bpf()) as usize;
         let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
         {
             let duration = gst::SECOND
@@ -597,8 +640,6 @@ impl BaseSrcImpl for NdiAudioSrc {
                     .unwrap(),
             );
         }
-
-        gst_log!(self.cat, obj: element, "Produced buffer {:?}", buffer);
 
         Ok(buffer)
     }
