@@ -1051,8 +1051,11 @@ impl<T: ReceiverType> Receiver<T> {
         timestamp: i64,
         timecode: i64,
         duration: gst::ClockTime,
-    ) -> (gst::ClockTime, gst::ClockTime) {
-        let clock = element.get_clock().unwrap();
+    ) -> Option<(gst::ClockTime, gst::ClockTime)> {
+        let clock = match element.get_clock() {
+            None => return None,
+            Some(clock) => clock,
+        };
 
         // For now take the current running time as PTS. At a later time we
         // will want to work with the timestamp given by the NDI SDK if available
@@ -1112,7 +1115,7 @@ impl<T: ReceiverType> Receiver<T> {
             duration,
         );
 
-        (pts, duration)
+        Some((pts, duration))
     }
 }
 
@@ -1197,7 +1200,12 @@ impl Receiver<VideoReceiver> {
             video_frame,
         );
 
-        let (pts, duration) = self.calculate_video_timestamp(element, &video_frame);
+        let (pts, duration) = self
+            .calculate_video_timestamp(element, &video_frame)
+            .ok_or_else(|| {
+                gst_debug!(self.0.cat, obj: element, "Flushing, dropping buffer");
+                gst::FlowError::CustomError
+            })?;
 
         // Simply read all video frames while flushing but don't copy them or anything to
         // make sure that we're not accumulating anything here
@@ -1219,7 +1227,7 @@ impl Receiver<VideoReceiver> {
         &self,
         element: &gst_base::BaseSrc,
         video_frame: &VideoFrame,
-    ) -> (gst::ClockTime, gst::ClockTime) {
+    ) -> Option<(gst::ClockTime, gst::ClockTime)> {
         let duration = gst::SECOND
             .mul_div_floor(
                 video_frame.frame_rate().1 as u64,
@@ -1602,7 +1610,12 @@ impl Receiver<AudioReceiver> {
             audio_frame,
         );
 
-        let (pts, duration) = self.calculate_audio_timestamp(element, &audio_frame);
+        let (pts, duration) = self
+            .calculate_audio_timestamp(element, &audio_frame)
+            .ok_or_else(|| {
+                gst_debug!(self.0.cat, obj: element, "Flushing, dropping buffer");
+                gst::FlowError::CustomError
+            })?;
 
         // Simply read all video frames while flushing but don't copy them or anything to
         // make sure that we're not accumulating anything here
@@ -1624,7 +1637,7 @@ impl Receiver<AudioReceiver> {
         &self,
         element: &gst_base::BaseSrc,
         audio_frame: &AudioFrame,
-    ) -> (gst::ClockTime, gst::ClockTime) {
+    ) -> Option<(gst::ClockTime, gst::ClockTime)> {
         let duration = gst::SECOND
             .mul_div_floor(
                 audio_frame.no_samples() as u64,
