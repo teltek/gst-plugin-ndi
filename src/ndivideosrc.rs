@@ -493,14 +493,22 @@ impl BaseSrcImpl for NdiVideoSrc {
                 let settings = self.settings.lock().unwrap();
 
                 if state.current_latency.is_some() {
-                    let latency = if settings.timestamp_mode == TimestampMode::Timestamp {
+                    let min = if settings.timestamp_mode != TimestampMode::Timecode {
                         state.current_latency
                     } else {
                         0.into()
                     };
 
-                    gst_debug!(self.cat, obj: element, "Returning latency {}", latency);
-                    q.set(true, latency, gst::CLOCK_TIME_NONE);
+                    let max = 5 * state.current_latency;
+
+                    gst_debug!(
+                        self.cat,
+                        obj: element,
+                        "Returning latency min {} max {}",
+                        min,
+                        max
+                    );
+                    q.set(true, min, max);
                     true
                 } else {
                     false
