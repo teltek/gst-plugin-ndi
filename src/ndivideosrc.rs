@@ -556,14 +556,26 @@ impl BaseSrcImpl for NdiVideoSrc {
                 let mut state = self.state.lock().unwrap();
                 state.receiver = Some(recv);
                 if state.info.as_ref() != Some(&info) {
-                    let caps = info.to_caps().unwrap();
+                    let caps = info.to_caps().ok_or_else(|| {
+                        gst_element_error!(
+                            element,
+                            gst::ResourceError::Settings,
+                            ["Invalid audio info received: {:?}", info]
+                        );
+                        gst::FlowError::NotNegotiated
+                    })?;
                     state.info = Some(info.clone());
                     state.current_latency = buffer.get_duration();
                     drop(state);
                     gst_debug!(self.cat, obj: element, "Configuring for caps {}", caps);
-                    element
-                        .set_caps(&caps)
-                        .map_err(|_| gst::FlowError::NotNegotiated)?;
+                    element.set_caps(&caps).map_err(|_| {
+                        gst_element_error!(
+                            element,
+                            gst::CoreError::Negotiation,
+                            ["Failed to negotiate caps: {:?}", caps]
+                        );
+                        gst::FlowError::NotNegotiated
+                    })?;
 
                     let _ = element
                         .post_message(&gst::Message::new_latency().src(Some(element)).build());

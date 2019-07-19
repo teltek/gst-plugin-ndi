@@ -96,7 +96,7 @@ impl FindInstance {
             let mut sources = vec![];
             for i in 0..no_sources {
                 sources.push(Source::Borrowed(
-                    ptr::NonNull::new(sources_ptr.add(i as usize) as *mut _).unwrap(),
+                    ptr::NonNull::new_unchecked(sources_ptr.add(i as usize) as *mut _),
                     self,
                 ));
             }
