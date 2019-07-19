@@ -724,7 +724,7 @@ fn connect_ndi_async(
 
     let timer = time::Instant::now();
     let source = loop {
-        find.wait_for_sources(100);
+        let new_sources = find.wait_for_sources(100);
         let sources = find.get_current_sources();
 
         gst_debug!(
@@ -733,6 +733,18 @@ fn connect_ndi_async(
             "Total sources found in network {}",
             sources.len(),
         );
+
+        if new_sources {
+            for source in &sources {
+                gst_debug!(
+                    cat,
+                    obj: element,
+                    "Found source '{}' with IP {}",
+                    source.ndi_name(),
+                    source.ip_address(),
+                );
+            }
+        }
 
         {
             let receivers = HASHMAP_RECEIVERS.lock().unwrap();
