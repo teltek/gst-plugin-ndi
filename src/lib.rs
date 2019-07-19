@@ -1,7 +1,6 @@
 #[macro_use]
 extern crate glib;
 use glib::prelude::*;
-use glib::subclass::prelude::*;
 #[macro_use]
 extern crate gstreamer as gst;
 extern crate gstreamer_audio as gst_audio;

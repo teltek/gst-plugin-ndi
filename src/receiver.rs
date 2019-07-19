@@ -20,8 +20,8 @@ enum ReceiverInfo {
         id: usize,
         ndi_name: Option<String>,
         ip_address: Option<String>,
-        video: Option<Weak<ReceiverInner>>,
-        audio: Option<Weak<ReceiverInner>>,
+        video: Option<Weak<ReceiverInner<VideoReceiver>>>,
+        audio: Option<Weak<ReceiverInner<AudioReceiver>>>,
         observations: Observations,
     },
     Connected {
@@ -29,8 +29,8 @@ enum ReceiverInfo {
         ndi_name: String,
         ip_address: String,
         recv: RecvInstance,
-        video: Option<Weak<ReceiverInner>>,
-        audio: Option<Weak<ReceiverInner>>,
+        video: Option<Weak<ReceiverInner<VideoReceiver>>>,
+        audio: Option<Weak<ReceiverInner<AudioReceiver>>>,
         observations: Observations,
     },
 }
@@ -44,24 +44,44 @@ lazy_static! {
 
 static ID_RECEIVER: AtomicUsize = AtomicUsize::new(0);
 
-#[derive(Clone)]
-pub struct Receiver(Arc<ReceiverInner>);
+pub trait ReceiverType: 'static {
+    type InfoType: Send + 'static;
+    const IS_VIDEO: bool;
+}
+
+pub enum AudioReceiver {}
+pub enum VideoReceiver {}
+
+impl ReceiverType for AudioReceiver {
+    type InfoType = gst_audio::AudioInfo;
+    const IS_VIDEO: bool = false;
+}
+
+impl ReceiverType for VideoReceiver {
+    type InfoType = gst_video::VideoInfo;
+    const IS_VIDEO: bool = true;
+}
+
+pub struct Receiver<T: ReceiverType>(Arc<ReceiverInner<T>>);
+
+impl<T: ReceiverType> Clone for Receiver<T> {
+    fn clone(&self) -> Self {
+        Receiver(self.0.clone())
+    }
+}
 
 #[derive(Debug)]
-pub enum ReceiverItem {
-    AudioBuffer(gst::Buffer, gst_audio::AudioInfo),
-    VideoBuffer(gst::Buffer, gst_video::VideoInfo),
+pub enum ReceiverItem<T: ReceiverType> {
+    Buffer(gst::Buffer, T::InfoType),
     Flushing,
     Timeout,
     Error(gst::FlowError),
 }
 
-struct ReceiverInner {
+pub struct ReceiverInner<T: ReceiverType> {
     id: usize,
 
-    queue: ReceiverQueue,
-
-    video: bool,
+    queue: ReceiverQueue<T>,
 
     recv: Mutex<Option<RecvInstance>>,
     recv_cond: Condvar,
@@ -76,10 +96,15 @@ struct ReceiverInner {
     thread: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
-#[derive(Clone)]
-struct ReceiverQueue(Arc<(Mutex<ReceiverQueueInner>, Condvar)>);
+struct ReceiverQueue<T: ReceiverType>(Arc<(Mutex<ReceiverQueueInner<T>>, Condvar)>);
 
-struct ReceiverQueueInner {
+impl<T: ReceiverType> Clone for ReceiverQueue<T> {
+    fn clone(&self) -> Self {
+        ReceiverQueue(self.0.clone())
+    }
+}
+
+struct ReceiverQueueInner<T: ReceiverType> {
     // If we should be capturing at all or go out of our capture loop
     //
     // This is true as long as the source element is in Paused/Playing
@@ -94,7 +119,7 @@ struct ReceiverQueueInner {
     // Queue containing our buffers. This holds at most 5 buffers at a time.
     //
     // On timeout/error will contain a single item and then never be filled again
-    buffer_queue: VecDeque<ReceiverItem>,
+    buffer_queue: VecDeque<(gst::Buffer, T::InfoType)>,
 
     error: Option<gst::FlowError>,
     timeout: bool,
@@ -320,12 +345,19 @@ impl Default for TimeMapping {
     }
 }
 
-#[derive(Clone)]
-pub struct ReceiverControlHandle {
-    queue: ReceiverQueue,
+pub struct ReceiverControlHandle<T: ReceiverType> {
+    queue: ReceiverQueue<T>,
 }
 
-impl ReceiverControlHandle {
+impl<T: ReceiverType> Clone for ReceiverControlHandle<T> {
+    fn clone(&self) -> Self {
+        ReceiverControlHandle {
+            queue: self.queue.clone(),
+        }
+    }
+}
+
+impl<T: ReceiverType> ReceiverControlHandle<T> {
     pub fn set_flushing(&self, flushing: bool) {
         let mut queue = (self.queue.0).0.lock().unwrap();
         queue.flushing = flushing;
@@ -344,49 +376,34 @@ impl ReceiverControlHandle {
     }
 }
 
-impl Receiver {
+impl<T: ReceiverType> Receiver<T> {
     fn new(
         info: &mut ReceiverInfo,
-        video: bool,
         timestamp_mode: TimestampMode,
         timeout: u32,
         element: &gst_base::BaseSrc,
         cat: gst::DebugCategory,
-    ) -> Self {
-        let (id, storage, recv, observations) = if video {
-            match info {
-                ReceiverInfo::Connecting {
-                    id,
-                    ref mut video,
-                    ref observations,
-                    ..
-                } => (*id, video, None, observations),
-                ReceiverInfo::Connected {
-                    id,
-                    ref mut video,
-                    ref mut recv,
-                    ref observations,
-                    ..
-                } => (*id, video, Some(recv.clone()), observations),
-            }
-        } else {
-            match info {
-                ReceiverInfo::Connecting {
-                    id,
-                    ref mut audio,
-                    ref observations,
-                    ..
-                } => (*id, audio, None, observations),
-                ReceiverInfo::Connected {
-                    id,
-                    ref mut audio,
-                    ref mut recv,
-                    ref observations,
-                    ..
-                } => (*id, audio, Some(recv.clone()), observations),
-            }
+    ) -> Self
+    where
+        Receiver<T>: ReceiverCapture<T>,
+    {
+        let (id, storage_video, storage_audio, recv, observations) = match info {
+            ReceiverInfo::Connecting {
+                id,
+                ref observations,
+                ref mut audio,
+                ref mut video,
+                ..
+            } => (*id, video, audio, None, observations),
+            ReceiverInfo::Connected {
+                id,
+                ref mut recv,
+                ref observations,
+                ref mut audio,
+                ref mut video,
+                ..
+            } => (*id, video, audio, Some(recv.clone()), observations),
         };
-        assert!(storage.is_none());
 
         let receiver = Receiver(Arc::new(ReceiverInner {
             id,
@@ -401,7 +418,6 @@ impl Receiver {
                 }),
                 Condvar::new(),
             ))),
-            video,
             recv: Mutex::new(recv),
             recv_cond: Condvar::new(),
             observations: observations.clone(),
@@ -439,14 +455,14 @@ impl Receiver {
         });
 
         let weak = Arc::downgrade(&receiver.0);
-        *storage = Some(weak);
+        Self::store_internal(storage_video, storage_audio, weak);
 
         *receiver.0.thread.lock().unwrap() = Some(thread);
 
         receiver
     }
 
-    pub fn receiver_control_handle(&self) -> ReceiverControlHandle {
+    pub fn receiver_control_handle(&self) -> ReceiverControlHandle<T> {
         ReceiverControlHandle {
             queue: self.0.queue.clone(),
         }
@@ -469,7 +485,7 @@ impl Receiver {
         (self.0.queue.0).1.notify_all();
     }
 
-    pub fn capture(&self) -> ReceiverItem {
+    pub fn capture(&self) -> ReceiverItem<T> {
         let mut queue = (self.0.queue.0).0.lock().unwrap();
         loop {
             if let Some(err) = queue.error {
@@ -478,8 +494,8 @@ impl Receiver {
                 return ReceiverItem::Timeout;
             } else if queue.flushing || !queue.capturing {
                 return ReceiverItem::Flushing;
-            } else if let Some(item) = queue.buffer_queue.pop_front() {
-                return item;
+            } else if let Some((buffer, info)) = queue.buffer_queue.pop_front() {
+                return ReceiverItem::Buffer(buffer, info);
             }
 
             queue = (self.0.queue.0).1.wait(queue).unwrap();
@@ -487,7 +503,7 @@ impl Receiver {
     }
 }
 
-impl Drop for ReceiverInner {
+impl<T: ReceiverType> Drop for ReceiverInner<T> {
     fn drop(&mut self) {
         // Will shut down the receiver thread on the next iteration
         let mut queue = (self.queue.0).0.lock().unwrap();
@@ -516,7 +532,7 @@ impl Drop for ReceiverInner {
                 } => (audio, video),
             };
             if video.is_some() && audio.is_some() {
-                if self.video {
+                if T::IS_VIDEO {
                     *video = None;
                 } else {
                     *audio = None;
@@ -532,7 +548,7 @@ impl Drop for ReceiverInner {
     }
 }
 
-pub fn connect_ndi(
+pub fn connect_ndi<T: ReceiverType>(
     cat: gst::DebugCategory,
     element: &gst_base::BaseSrc,
     ip_address: Option<&str>,
@@ -542,12 +558,13 @@ pub fn connect_ndi(
     bandwidth: NDIlib_recv_bandwidth_e,
     timestamp_mode: TimestampMode,
     timeout: u32,
-) -> Option<Receiver> {
+) -> Option<Receiver<T>>
+where
+    Receiver<T>: ReceiverCapture<T>,
+{
     gst_debug!(cat, obj: element, "Starting NDI connection...");
 
     let mut receivers = HASHMAP_RECEIVERS.lock().unwrap();
-
-    let video = element.get_type() == ndivideosrc::NdiVideoSrc::get_type();
 
     // Check if we already have a receiver for this very stream
     for val in receivers.values_mut() {
@@ -579,26 +596,19 @@ pub fn connect_ndi(
         };
 
         if val_ip_address == ip_address || val_ndi_name == ndi_name {
-            if (val_video.is_some() || !video) && (val_audio.is_some() || video) {
+            if (val_video.is_some() || !T::IS_VIDEO) && (val_audio.is_some() || T::IS_VIDEO) {
                 gst_error!(
                     cat,
                     obj: element,
                     "Source with ndi-name '{:?}' and ip-address '{:?}' already in use for {}",
                     val_ndi_name,
                     val_ip_address,
-                    if video { "video" } else { "audio" },
+                    if T::IS_VIDEO { "video" } else { "audio" },
                 );
 
                 return None;
             } else {
-                return Some(Receiver::new(
-                    val,
-                    video,
-                    timestamp_mode,
-                    timeout,
-                    element,
-                    cat,
-                ));
+                return Some(Receiver::new(val, timestamp_mode, timeout, element, cat));
             }
         }
     }
@@ -614,7 +624,7 @@ pub fn connect_ndi(
         observations: Observations::new(),
     };
 
-    let receiver = Receiver::new(&mut info, video, timestamp_mode, timeout, element, cat);
+    let receiver = Receiver::new(&mut info, timestamp_mode, timeout, element, cat);
 
     receivers.insert(id_receiver, info);
 
@@ -840,7 +850,10 @@ fn connect_ndi_async(
     Ok(())
 }
 
-fn receive_thread(receiver: &Weak<ReceiverInner>) {
+fn receive_thread<T: ReceiverType>(receiver: &Weak<ReceiverInner<T>>)
+where
+    Receiver<T>: ReceiverCapture<T>,
+{
     // First loop until we actually are connected, or an error happened
     let recv = {
         let receiver = match receiver.upgrade().map(Receiver) {
@@ -907,13 +920,12 @@ fn receive_thread(receiver: &Weak<ReceiverInner>) {
         }
 
         let queue = recv.get_queue();
-        if (!receiver.0.video && queue.audio_frames() <= 1)
-            || (receiver.0.video && queue.video_frames() <= 1)
+        if (!T::IS_VIDEO && queue.audio_frames() <= 1) || (T::IS_VIDEO && queue.video_frames() <= 1)
         {
             break;
         }
 
-        let _ = recv.capture(receiver.0.video, !receiver.0.video, false, 0);
+        let _ = recv.capture(T::IS_VIDEO, !T::IS_VIDEO, false, 0);
     }
 
     // And if that went fine, capture until we're done
@@ -933,15 +945,7 @@ fn receive_thread(receiver: &Weak<ReceiverInner>) {
             }
         }
 
-        let res = if receiver.0.video {
-            receiver
-                .capture_video(&element, &recv)
-                .map(|(buffer, info)| ReceiverItem::VideoBuffer(buffer, info))
-        } else {
-            receiver
-                .capture_audio(&element, &recv)
-                .map(|(buffer, info)| ReceiverItem::AudioBuffer(buffer, info))
-        };
+        let res = receiver.capture_internal(&element, &recv);
 
         match res {
             Ok(item) => {
@@ -983,7 +987,59 @@ fn receive_thread(receiver: &Weak<ReceiverInner>) {
     }
 }
 
-impl Receiver {
+pub trait ReceiverCapture<T: ReceiverType> {
+    fn capture_internal(
+        &self,
+        element: &gst_base::BaseSrc,
+        recv: &RecvInstance,
+    ) -> Result<(gst::Buffer, T::InfoType), gst::FlowError>;
+
+    fn store_internal(
+        storage_video: &mut Option<Weak<ReceiverInner<VideoReceiver>>>,
+        storage_audio: &mut Option<Weak<ReceiverInner<AudioReceiver>>>,
+        weak: Weak<ReceiverInner<T>>,
+    );
+}
+
+impl ReceiverCapture<VideoReceiver> for Receiver<VideoReceiver> {
+    fn capture_internal(
+        &self,
+        element: &gst_base::BaseSrc,
+        recv: &RecvInstance,
+    ) -> Result<(gst::Buffer, gst_video::VideoInfo), gst::FlowError> {
+        self.capture_video(element, recv)
+    }
+
+    fn store_internal(
+        storage_video: &mut Option<Weak<ReceiverInner<VideoReceiver>>>,
+        _storage_audio: &mut Option<Weak<ReceiverInner<AudioReceiver>>>,
+        weak: Weak<ReceiverInner<VideoReceiver>>,
+    ) {
+        assert!(storage_video.is_none());
+        *storage_video = Some(weak);
+    }
+}
+
+impl ReceiverCapture<AudioReceiver> for Receiver<AudioReceiver> {
+    fn capture_internal(
+        &self,
+        element: &gst_base::BaseSrc,
+        recv: &RecvInstance,
+    ) -> Result<(gst::Buffer, gst_audio::AudioInfo), gst::FlowError> {
+        self.capture_audio(element, recv)
+    }
+
+    fn store_internal(
+        _storage_video: &mut Option<Weak<ReceiverInner<VideoReceiver>>>,
+        storage_audio: &mut Option<Weak<ReceiverInner<AudioReceiver>>>,
+        weak: Weak<ReceiverInner<AudioReceiver>>,
+    ) {
+        assert!(storage_audio.is_none());
+        *storage_audio = Some(weak);
+    }
+}
+
+impl Receiver<VideoReceiver> {
     fn capture_video(
         &self,
         element: &gst_base::BaseSrc,
@@ -1414,7 +1470,9 @@ impl Receiver {
 
         Ok(vframe.into_buffer())
     }
+}
 
+impl Receiver<AudioReceiver> {
     fn capture_audio(
         &self,
         element: &gst_base::BaseSrc,

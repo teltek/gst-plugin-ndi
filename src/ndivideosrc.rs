@@ -21,6 +21,7 @@ use Receiver;
 use ReceiverControlHandle;
 use ReceiverItem;
 use TimestampMode;
+use VideoReceiver;
 use DEFAULT_RECEIVER_NDI_NAME;
 
 #[derive(Debug, Clone)]
@@ -124,7 +125,7 @@ static PROPERTIES: [subclass::Property; 7] = [
 struct State {
     info: Option<gst_video::VideoInfo>,
     current_latency: gst::ClockTime,
-    receiver: Option<Receiver>,
+    receiver: Option<Receiver<VideoReceiver>>,
 }
 
 impl Default for State {
@@ -141,7 +142,7 @@ pub(crate) struct NdiVideoSrc {
     cat: gst::DebugCategory,
     settings: Mutex<Settings>,
     state: Mutex<State>,
-    receiver_controller: Mutex<Option<ReceiverControlHandle>>,
+    receiver_controller: Mutex<Option<ReceiverControlHandle<VideoReceiver>>>,
 }
 
 impl ObjectSubclass for NdiVideoSrc {
@@ -543,7 +544,7 @@ impl BaseSrcImpl for NdiVideoSrc {
         };
 
         match recv.capture() {
-            ReceiverItem::VideoBuffer(buffer, info) => {
+            ReceiverItem::Buffer(buffer, info) => {
                 let mut state = self.state.lock().unwrap();
                 state.receiver = Some(recv);
                 if state.info.as_ref() != Some(&info) {
@@ -565,7 +566,6 @@ impl BaseSrcImpl for NdiVideoSrc {
             ReceiverItem::Timeout => Err(gst::FlowError::Eos),
             ReceiverItem::Flushing => Err(gst::FlowError::Flushing),
             ReceiverItem::Error(err) => Err(err),
-            ReceiverItem::AudioBuffer(..) => unreachable!(),
         }
     }
 }

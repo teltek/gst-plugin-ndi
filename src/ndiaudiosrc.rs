@@ -15,6 +15,7 @@ use std::{i32, u32};
 use connect_ndi;
 use ndisys;
 
+use AudioReceiver;
 use Receiver;
 use ReceiverControlHandle;
 use ReceiverItem;
@@ -121,7 +122,7 @@ static PROPERTIES: [subclass::Property; 7] = [
 
 struct State {
     info: Option<gst_audio::AudioInfo>,
-    receiver: Option<Receiver>,
+    receiver: Option<Receiver<AudioReceiver>>,
     current_latency: gst::ClockTime,
 }
 
@@ -139,7 +140,7 @@ pub(crate) struct NdiAudioSrc {
     cat: gst::DebugCategory,
     settings: Mutex<Settings>,
     state: Mutex<State>,
-    receiver_controller: Mutex<Option<ReceiverControlHandle>>,
+    receiver_controller: Mutex<Option<ReceiverControlHandle<AudioReceiver>>>,
 }
 
 impl ObjectSubclass for NdiAudioSrc {
@@ -503,7 +504,7 @@ impl BaseSrcImpl for NdiAudioSrc {
         };
 
         match recv.capture() {
-            ReceiverItem::AudioBuffer(buffer, info) => {
+            ReceiverItem::Buffer(buffer, info) => {
                 let mut state = self.state.lock().unwrap();
                 state.receiver = Some(recv);
                 if state.info.as_ref() != Some(&info) {
@@ -525,7 +526,6 @@ impl BaseSrcImpl for NdiAudioSrc {
             ReceiverItem::Flushing => Err(gst::FlowError::Flushing),
             ReceiverItem::Timeout => Err(gst::FlowError::Eos),
             ReceiverItem::Error(err) => Err(err),
-            ReceiverItem::VideoBuffer(..) => unreachable!(),
         }
     }
 }
