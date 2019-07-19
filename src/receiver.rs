@@ -570,6 +570,8 @@ where
 {
     gst_debug!(cat, obj: element, "Starting NDI connection...");
 
+    let ip_address = ip_address.map(str::to_lowercase);
+
     let mut receivers = HASHMAP_RECEIVERS.lock().unwrap();
 
     // Check if we already have a receiver for this very stream
@@ -584,7 +586,7 @@ where
             } => (
                 audio,
                 video,
-                ip_address.as_ref().map(String::as_ref),
+                ip_address.as_ref(),
                 ndi_name.as_ref().map(String::as_ref),
             ),
             ReceiverInfo::Connected {
@@ -593,15 +595,10 @@ where
                 ref ip_address,
                 ref ndi_name,
                 ..
-            } => (
-                audio,
-                video,
-                Some(ip_address.as_str()),
-                Some(ndi_name.as_str()),
-            ),
+            } => (audio, video, Some(ip_address), Some(ndi_name.as_str())),
         };
 
-        if val_ip_address == ip_address || val_ndi_name == ndi_name {
+        if val_ip_address == ip_address.as_ref() || val_ndi_name == ndi_name {
             if (val_video.is_some() || !T::IS_VIDEO) && (val_audio.is_some() || T::IS_VIDEO) {
                 gst_element_error!(
                     element,
@@ -626,7 +623,7 @@ where
     let mut info = ReceiverInfo::Connecting {
         id: id_receiver,
         ndi_name: ndi_name.map(String::from),
-        ip_address: ip_address.map(String::from),
+        ip_address,
         video: None,
         audio: None,
         observations: Observations::new(),
@@ -775,7 +772,7 @@ fn connect_ndi_async(
 
             let source = sources.iter().find(|s| {
                 Some(s.ndi_name()) == ndi_name.as_ref().map(String::as_str)
-                    || Some(s.ip_address()) == ip_address.as_ref().map(String::as_str)
+                    || Some(&s.ip_address().to_lowercase()) == ip_address.as_ref()
             });
 
             if let Some(source) = source {
@@ -842,7 +839,7 @@ fn connect_ndi_async(
     *info = ReceiverInfo::Connected {
         id: id_receiver,
         ndi_name: source.ndi_name().to_owned(),
-        ip_address: source.ip_address().to_owned(),
+        ip_address: source.ip_address().to_lowercase(),
         recv: recv.clone(),
         video: video.clone(),
         audio: audio.clone(),
