@@ -45,18 +45,20 @@ fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
 
 lazy_static! {
     static ref DEFAULT_RECEIVER_NDI_NAME: String = {
-        format!("GStreamer NDI Source {}-{}", env!("CARGO_PKG_VERSION"), env!("COMMIT_ID"))
+        format!(
+            "GStreamer NDI Source {}-{}",
+            env!("CARGO_PKG_VERSION"),
+            env!("COMMIT_ID")
+        )
     };
+}
 
-    #[cfg(feature = "reference-timestamps")]
-    static ref TIMECODE_CAPS: gst::Caps = {
-        gst::Caps::new_simple("timestamp/x-ndi-timecode", &[])
-    };
-
-    #[cfg(feature = "reference-timestamps")]
-    static ref TIMESTAMP_CAPS: gst::Caps = {
-        gst::Caps::new_simple("timestamp/x-ndi-timestamp", &[])
-    };
+#[cfg(feature = "reference-timestamps")]
+lazy_static! {
+    static ref TIMECODE_CAPS: gst::Caps =
+        { gst::Caps::new_simple("timestamp/x-ndi-timecode", &[]) };
+    static ref TIMESTAMP_CAPS: gst::Caps =
+        { gst::Caps::new_simple("timestamp/x-ndi-timestamp", &[]) };
 }
 
 impl glib::translate::ToGlib for TimestampMode {

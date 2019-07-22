@@ -1316,7 +1316,7 @@ impl Receiver<VideoReceiver> {
                 return Err(gst::FlowError::NotNegotiated);
             }
 
-            let builder = gst_video::VideoInfo::new(
+            let mut builder = gst_video::VideoInfo::new(
                 format,
                 video_frame.xres() as u32,
                 video_frame.yres() as u32,
