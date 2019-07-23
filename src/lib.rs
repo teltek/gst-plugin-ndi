@@ -1,255 +1,156 @@
-#![allow(non_camel_case_types, non_upper_case_globals, non_snake_case)]
-
 #[macro_use]
 extern crate glib;
+use glib::prelude::*;
 #[macro_use]
 extern crate gstreamer as gst;
-use gst::prelude::*;
 extern crate gstreamer_audio as gst_audio;
 extern crate gstreamer_base as gst_base;
+extern crate gstreamer_sys as gst_sys;
 extern crate gstreamer_video as gst_video;
 
 #[macro_use]
 extern crate lazy_static;
 extern crate byte_slice_cast;
 
+pub mod ndi;
 mod ndiaudiosrc;
 pub mod ndisys;
 mod ndivideosrc;
+pub mod receiver;
 
-// use gst_plugin::base_src::*;
+use ndi::*;
 use ndisys::*;
-use std::ffi::{CStr, CString};
+use receiver::*;
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::time;
 
-use gst::GstObjectExt;
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
+#[repr(u32)]
+pub enum TimestampMode {
+    ReceiveTime = 0,
+    Timecode = 1,
+    Timestamp = 2,
+}
 
 fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
+    if !ndi::initialize() {
+        return Err(glib_bool_error!("Cannot initialize NDI"));
+    }
+
     ndivideosrc::register(plugin)?;
     ndiaudiosrc::register(plugin)?;
     Ok(())
 }
 
-struct ndi_receiver_info {
-    stream_name: String,
-    ip: String,
-    video: bool,
-    audio: bool,
-    ndi_instance: NdiInstance,
-    initial_timestamp: u64,
-    id: i8,
-}
-
-struct Ndi {
-    start_pts: gst::ClockTime,
-}
-
-static mut ndi_struct: Ndi = Ndi {
-    start_pts: gst::ClockTime(Some(0)),
-};
-
 lazy_static! {
-    static ref hashmap_receivers: Mutex<HashMap<i8, ndi_receiver_info>> = {
-        let m = HashMap::new();
-        Mutex::new(m)
+    static ref DEFAULT_RECEIVER_NDI_NAME: String = {
+        format!(
+            "GStreamer NDI Source {}-{}",
+            env!("CARGO_PKG_VERSION"),
+            env!("COMMIT_ID")
+        )
     };
 }
 
-static mut id_receiver: i8 = 0;
+#[cfg(feature = "reference-timestamps")]
+lazy_static! {
+    static ref TIMECODE_CAPS: gst::Caps =
+        { gst::Caps::new_simple("timestamp/x-ndi-timecode", &[]) };
+    static ref TIMESTAMP_CAPS: gst::Caps =
+        { gst::Caps::new_simple("timestamp/x-ndi-timestamp", &[]) };
+}
 
-fn connect_ndi(
-    cat: gst::DebugCategory,
-    element: &gst_base::BaseSrc,
-    ip: &str,
-    stream_name: &str,
-) -> i8 {
-    gst_debug!(cat, obj: element, "Starting NDI connection...");
+impl glib::translate::ToGlib for TimestampMode {
+    type GlibType = i32;
 
-    let mut receivers = hashmap_receivers.lock().unwrap();
-    let mut audio = false;
-    let mut video = false;
-
-    if element
-        .get_factory()
-        .map(|f| f.get_name() == "ndiaudiosrc")
-        .unwrap_or(false)
-    {
-        audio = true;
-    } else {
-        video = true;
-    }
-
-    for val in receivers.values_mut() {
-        if val.ip == ip || val.stream_name == stream_name {
-            if (val.audio && val.video) || (val.audio && audio) || (val.video && video) {
-                continue;
-            } else {
-                if video {
-                    val.video = video;
-                } else {
-                    val.audio = audio;
-                }
-                return val.id;
-            }
-        }
-    }
-    unsafe {
-        if !NDIlib_initialize() {
-            gst_element_error!(
-                element,
-                gst::CoreError::Negotiation,
-                ["Cannot run NDI: NDIlib_initialize error"]
-            );
-            return 0;
-        }
-
-        let NDI_find_create_desc: NDIlib_find_create_t = Default::default();
-        let pNDI_find = NDIlib_find_create_v2(&NDI_find_create_desc);
-        if pNDI_find.is_null() {
-            gst_element_error!(
-                element,
-                gst::CoreError::Negotiation,
-                ["Cannot run NDI: NDIlib_find_create_v2 error"]
-            );
-            return 0;
-        }
-
-        let mut total_sources: u32 = 0;
-        let p_sources;
-
-        // TODO Sleep 1s to wait for all sources
-        NDIlib_find_wait_for_sources(pNDI_find, 2000);
-        p_sources = NDIlib_find_get_current_sources(pNDI_find, &mut total_sources as *mut u32);
-
-        // We need at least one source
-        if p_sources.is_null() {
-            gst_element_error!(
-                element,
-                gst::CoreError::Negotiation,
-                ["Error getting NDIlib_find_get_current_sources"]
-            );
-            return 0;
-        }
-
-        let mut no_source: isize = -1;
-        for i in 0..total_sources as isize {
-            if CStr::from_ptr((*p_sources.offset(i)).p_ndi_name)
-                .to_string_lossy()
-                .into_owned()
-                == stream_name
-                || CStr::from_ptr((*p_sources.offset(i)).p_ip_address)
-                    .to_string_lossy()
-                    .into_owned()
-                    == ip
-            {
-                no_source = i;
-                break;
-            }
-        }
-        if no_source == -1 {
-            gst_element_error!(element, gst::ResourceError::OpenRead, ["Stream not found"]);
-            return 0;
-        }
-
-        gst_debug!(
-            cat,
-            obj: element,
-            "Total sources in network {}: Connecting to NDI source with name '{}' and address '{}'",
-            total_sources,
-            CStr::from_ptr((*p_sources.offset(no_source)).p_ndi_name)
-                .to_string_lossy()
-                .into_owned(),
-            CStr::from_ptr((*p_sources.offset(no_source)).p_ip_address)
-                .to_string_lossy()
-                .into_owned()
-        );
-
-        let source = *p_sources.offset(no_source);
-
-        let source_ip = CStr::from_ptr(source.p_ip_address)
-            .to_string_lossy()
-            .into_owned();
-        let source_name = CStr::from_ptr(source.p_ndi_name)
-            .to_string_lossy()
-            .into_owned();
-
-        let p_ndi_name = CString::new("Galicaster NDI Receiver").unwrap();
-        let NDI_recv_create_desc = NDIlib_recv_create_v3_t {
-            source_to_connect_to: source,
-            p_ndi_name: p_ndi_name.as_ptr(),
-            ..Default::default()
-        };
-
-        let pNDI_recv = NDIlib_recv_create_v3(&NDI_recv_create_desc);
-        if pNDI_recv.is_null() {
-            gst_element_error!(
-                element,
-                gst::CoreError::Negotiation,
-                ["Cannot run NDI: NDIlib_recv_create_v3 error"]
-            );
-            return 0;
-        }
-
-        NDIlib_find_destroy(pNDI_find);
-
-        let tally_state: NDIlib_tally_t = Default::default();
-        NDIlib_recv_set_tally(pNDI_recv, &tally_state);
-
-        let data = CString::new("<ndi_hwaccel enabled=\"true\"/>").unwrap();
-        let enable_hw_accel = NDIlib_metadata_frame_t {
-            length: data.to_bytes().len() as i32,
-            timecode: 0,
-            p_data: data.as_ptr(),
-        };
-
-        NDIlib_recv_send_metadata(pNDI_recv, &enable_hw_accel);
-
-        id_receiver += 1;
-        receivers.insert(
-            id_receiver,
-            ndi_receiver_info {
-                stream_name: source_name.clone(),
-                ip: source_ip.clone(),
-                video,
-                audio,
-                ndi_instance: NdiInstance { recv: pNDI_recv },
-                initial_timestamp: 0,
-                id: id_receiver,
-            },
-        );
-
-        gst_debug!(cat, obj: element, "Started NDI connection");
-        id_receiver
+    fn to_glib(&self) -> i32 {
+        *self as i32
     }
 }
 
-fn stop_ndi(cat: gst::DebugCategory, element: &gst_base::BaseSrc, id: i8) -> bool {
-    gst_debug!(cat, obj: element, "Closing NDI connection...");
-    let mut receivers = hashmap_receivers.lock().unwrap();
-    {
-        let val = receivers.get_mut(&id).unwrap();
-        if val.video && val.audio {
-            if element.get_name().contains("audiosrc") {
-                val.audio = false;
-            } else {
-                val.video = false;
-            }
-            return true;
-        }
-
-        let recv = &val.ndi_instance;
-        let pNDI_recv = recv.recv;
-        unsafe {
-            NDIlib_recv_destroy(pNDI_recv);
-            // ndi_struct.recv = None;
-            NDIlib_destroy();
+impl glib::translate::FromGlib<i32> for TimestampMode {
+    fn from_glib(value: i32) -> Self {
+        match value {
+            0 => TimestampMode::ReceiveTime,
+            1 => TimestampMode::Timecode,
+            2 => TimestampMode::Timestamp,
+            _ => unreachable!(),
         }
     }
-    receivers.remove(&id);
-    gst_debug!(cat, obj: element, "Closed NDI connection");
-    true
+}
+
+impl StaticType for TimestampMode {
+    fn static_type() -> glib::Type {
+        timestamp_mode_get_type()
+    }
+}
+
+impl<'a> glib::value::FromValueOptional<'a> for TimestampMode {
+    unsafe fn from_value_optional(value: &glib::Value) -> Option<Self> {
+        Some(glib::value::FromValue::from_value(value))
+    }
+}
+
+impl<'a> glib::value::FromValue<'a> for TimestampMode {
+    unsafe fn from_value(value: &glib::Value) -> Self {
+        use glib::translate::ToGlibPtr;
+
+        glib::translate::from_glib(gobject_sys::g_value_get_enum(value.to_glib_none().0))
+    }
+}
+
+impl glib::value::SetValue for TimestampMode {
+    unsafe fn set_value(value: &mut glib::Value, this: &Self) {
+        use glib::translate::{ToGlib, ToGlibPtrMut};
+
+        gobject_sys::g_value_set_enum(value.to_glib_none_mut().0, this.to_glib())
+    }
+}
+
+fn timestamp_mode_get_type() -> glib::Type {
+    use std::sync::Once;
+    static ONCE: Once = Once::new();
+    static mut TYPE: glib::Type = glib::Type::Invalid;
+
+    ONCE.call_once(|| {
+        use std::ffi;
+        use std::ptr;
+
+        static mut VALUES: [gobject_sys::GEnumValue; 4] = [
+            gobject_sys::GEnumValue {
+                value: TimestampMode::ReceiveTime as i32,
+                value_name: b"Receive Time\0" as *const _ as *const _,
+                value_nick: b"receive-time\0" as *const _ as *const _,
+            },
+            gobject_sys::GEnumValue {
+                value: TimestampMode::Timecode as i32,
+                value_name: b"NDI Timecode\0" as *const _ as *const _,
+                value_nick: b"timecode\0" as *const _ as *const _,
+            },
+            gobject_sys::GEnumValue {
+                value: TimestampMode::Timestamp as i32,
+                value_name: b"NDI Timestamp\0" as *const _ as *const _,
+                value_nick: b"timestamp\0" as *const _ as *const _,
+            },
+            gobject_sys::GEnumValue {
+                value: 0,
+                value_name: ptr::null(),
+                value_nick: ptr::null(),
+            },
+        ];
+
+        let name = ffi::CString::new("GstNdiTimestampMode").unwrap();
+        unsafe {
+            let type_ = gobject_sys::g_enum_register_static(name.as_ptr(), VALUES.as_ptr());
+            TYPE = glib::translate::from_glib(type_);
+        }
+    });
+
+    unsafe {
+        assert_ne!(TYPE, glib::Type::Invalid);
+        TYPE
+    }
 }
 
 gst_plugin_define!(
