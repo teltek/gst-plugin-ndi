@@ -1,7 +1,7 @@
 [package]
 name = "gst-plugin-ndi"
 version = "1.0.0"
-authors = ["Ruben Gonzalez <rubenrua@teltek.es>", "Daniel Vilar <daniel.peiteado@teltek.es>"]
+authors = ["Ruben Gonzalez <rubenrua@teltek.es>", "Daniel Vilar <daniel.peiteado@teltek.es>", "Sebastian Dröge <sebastian@centricular.com>"]
 repository = "https://github.com/teltek/gst-plugin-ndi"
 license = "LGPL"
 description = "NewTek NDI Plugin"
