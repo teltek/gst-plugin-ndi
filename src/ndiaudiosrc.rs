@@ -1,6 +1,5 @@
 use glib;
 use glib::subclass;
-use glib::subclass::prelude::*;
 use gst;
 use gst::prelude::*;
 use gst::subclass::prelude::*;
@@ -12,15 +11,15 @@ use gst_base::subclass::prelude::*;
 use std::sync::Mutex;
 use std::{i32, u32};
 
-use connect_ndi;
-use ndisys;
+use crate::connect_ndi;
+use crate::ndisys;
 
-use AudioReceiver;
-use Receiver;
-use ReceiverControlHandle;
-use ReceiverItem;
-use TimestampMode;
-use DEFAULT_RECEIVER_NDI_NAME;
+use crate::AudioReceiver;
+use crate::Receiver;
+use crate::ReceiverControlHandle;
+use crate::ReceiverItem;
+use crate::TimestampMode;
+use crate::DEFAULT_RECEIVER_NDI_NAME;
 
 #[derive(Debug, Clone)]
 struct Settings {

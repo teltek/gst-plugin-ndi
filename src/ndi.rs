@@ -1,4 +1,4 @@
-use ndisys::*;
+use crate::ndisys::*;
 use std::ffi;
 use std::mem;
 use std::ptr;

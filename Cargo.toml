@@ -5,6 +5,7 @@ authors = ["Ruben Gonzalez <rubenrua@teltek.es>", "Daniel Vilar <daniel.peiteado
 repository = "https://github.com/teltek/gst-plugin-ndi"
 license = "LGPL"
 description = "NewTek NDI Plugin"
+edition = "2018"
 
 [dependencies]
 glib = { version = "0.8.0", features = ["subclassing"] }
