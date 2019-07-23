@@ -69,7 +69,7 @@ https://gitlab.freedesktop.org/gstreamer/gst-plugins-rs
 
 License
 -------
-This plugin is licensed under the LGPL - see the ([LICENSE](LICENSE) file for details
+This plugin is licensed under the LGPL - see the [LICENSE](LICENSE) file for details
 
 
 Acknowledgments
