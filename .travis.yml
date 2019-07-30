@@ -26,5 +26,5 @@ install:
   - rustup component add clippy-preview
 script:
   - cargo fmt -- --check
-  - touch ./src/*.rs && cargo clippy -- -A clippy::cast_ptr_alignment -A clippy::new_ret_no_self
-  - cargo build
+  - cargo build --no-default-features
+  - touch ./src/*.rs && cargo clippy --no-default-features -- -A clippy::cast_ptr_alignment -A clippy::new_ret_no_self -Aclippy::or_fun_call -A clippy::cast_lossless -A clippy::too_many_arguments

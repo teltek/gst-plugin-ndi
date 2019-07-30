@@ -891,7 +891,7 @@ where
                 }
 
                 // If an error happened in the meantime, just go out of here
-                if let Some(_) = queue.error {
+                if queue.error.is_some() {
                     gst_error!(
                         receiver.0.cat,
                         obj: &element,
@@ -930,7 +930,7 @@ where
             }
 
             // If an error happened in the meantime, just go out of here
-            if let Some(_) = queue.error {
+            if queue.error.is_some() {
                 gst_error!(
                     receiver.0.cat,
                     obj: &element,
