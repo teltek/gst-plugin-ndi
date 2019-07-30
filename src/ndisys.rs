@@ -14,9 +14,11 @@
 )]
 extern "C" {
     pub fn NDIlib_initialize() -> bool;
+    pub fn NDIlib_destroy();
     pub fn NDIlib_find_create_v2(
         p_create_settings: *const NDIlib_find_create_t,
     ) -> NDIlib_find_instance_t;
+    pub fn NDIlib_find_destroy(p_instance: NDIlib_find_instance_t);
     pub fn NDIlib_find_wait_for_sources(
         p_instance: NDIlib_find_instance_t,
         timeout_in_ms: u32,
@@ -28,9 +30,7 @@ extern "C" {
     pub fn NDIlib_recv_create_v3(
         p_create_settings: *const NDIlib_recv_create_v3_t,
     ) -> NDIlib_recv_instance_t;
-    pub fn NDIlib_find_destroy(p_instance: NDIlib_find_instance_t);
     pub fn NDIlib_recv_destroy(p_instance: NDIlib_recv_instance_t);
-    pub fn NDIlib_destroy();
     pub fn NDIlib_recv_set_tally(
         p_instance: NDIlib_recv_instance_t,
         p_tally: *const NDIlib_tally_t,
