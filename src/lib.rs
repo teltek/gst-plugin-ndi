@@ -18,9 +18,9 @@ pub mod ndisys;
 mod ndivideosrc;
 pub mod receiver;
 
-use ndi::*;
-use ndisys::*;
-use receiver::*;
+use crate::ndi::*;
+use crate::ndisys::*;
+use crate::receiver::*;
 
 use std::collections::HashMap;
 use std::time;

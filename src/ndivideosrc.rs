@@ -1,28 +1,26 @@
 use glib;
 use glib::subclass;
-use glib::subclass::prelude::*;
 use gst;
 use gst::prelude::*;
 use gst::subclass::prelude::*;
 use gst_base;
 use gst_base::prelude::*;
 use gst_base::subclass::prelude::*;
-
 use gst_video;
 
 use std::sync::Mutex;
 use std::{i32, u32};
 
-use ndisys;
+use crate::ndisys;
 
-use connect_ndi;
+use crate::connect_ndi;
 
-use Receiver;
-use ReceiverControlHandle;
-use ReceiverItem;
-use TimestampMode;
-use VideoReceiver;
-use DEFAULT_RECEIVER_NDI_NAME;
+use crate::Receiver;
+use crate::ReceiverControlHandle;
+use crate::ReceiverItem;
+use crate::TimestampMode;
+use crate::VideoReceiver;
+use crate::DEFAULT_RECEIVER_NDI_NAME;
 
 #[derive(Debug, Clone)]
 struct Settings {
