@@ -410,7 +410,13 @@ impl ElementImpl for NdiVideoSrc {
 }
 
 impl BaseSrcImpl for NdiVideoSrc {
-    fn unlock(&self, element: &gst_base::BaseSrc) -> std::result::Result<(), gst::ErrorMessage> {
+    fn negotiate(&self, _element: &gst_base::BaseSrc) -> Result<(), gst::LoggableError> {
+        // Always succeed here without doing anything: we will set the caps once we received a
+        // buffer, there's nothing we can negotiate
+        Ok(())
+    }
+
+    fn unlock(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
         gst_debug!(self.cat, obj: element, "Unlocking",);
         if let Some(ref controller) = *self.receiver_controller.lock().unwrap() {
             controller.set_flushing(true);
@@ -418,10 +424,7 @@ impl BaseSrcImpl for NdiVideoSrc {
         Ok(())
     }
 
-    fn unlock_stop(
-        &self,
-        element: &gst_base::BaseSrc,
-    ) -> std::result::Result<(), gst::ErrorMessage> {
+    fn unlock_stop(&self, element: &gst_base::BaseSrc) -> Result<(), gst::ErrorMessage> {
         gst_debug!(self.cat, obj: element, "Stop unlocking",);
         if let Some(ref controller) = *self.receiver_controller.lock().unwrap() {
             controller.set_flushing(false);
