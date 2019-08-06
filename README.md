@@ -1,7 +1,7 @@
 GStreamer NDI Plugin for Linux
 ====================
 
-*Compiled and tested with Ubuntu 16.04.5, GStreamer 1.8.3 and NDI SDK 3.0.9 and 3.5.1*
+*Compiled and tested with Ubuntu 16.04.5, GStreamer 1.12 and NDI SDK 3.5.1*
 
 This is a plugin for the [GStreamer](https://gstreamer.freedesktop.org/) multimedia framework that allows GStreamer to receive a stream from a [NDI](https://www.newtek.com/ndi/) source. This plugin has been developed by [Teltek](http://teltek.es/) and was funded by the [University of the Arts London](https://www.arts.ac.uk/) and [The University of Manchester](https://www.manchester.ac.uk/).
 
@@ -52,6 +52,8 @@ cargo build
 export GST_PLUGIN_PATH=`pwd`/target/debug
 gst-inspect-1.0 ndi
 ```
+
+By defult GStreamer 1.16 is required, to use only GStreamer 1.12 instead of 1.16, pass `--disable-default-features` to cargo. Only a subset of video formats is supported with this GStreamer version.
 
 If all went ok, you should see info related to the NDI element. To make the plugin available without using `GST_PLUGIN_PATH` it's necessary to copy the plugin to the gstreamer plugins folder.
 ```
