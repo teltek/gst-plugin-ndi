@@ -5,7 +5,6 @@ use glib::prelude::*;
 extern crate gstreamer as gst;
 extern crate gstreamer_audio as gst_audio;
 extern crate gstreamer_base as gst_base;
-extern crate gstreamer_sys as gst_sys;
 extern crate gstreamer_video as gst_video;
 
 #[macro_use]
