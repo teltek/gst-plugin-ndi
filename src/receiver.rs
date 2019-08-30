@@ -598,7 +598,9 @@ where
             } => (audio, video, Some(ip_address), Some(ndi_name.as_str())),
         };
 
-        if val_ip_address == ip_address.as_ref() || val_ndi_name == ndi_name {
+        if (val_ip_address.is_some() && val_ip_address == ip_address.as_ref())
+            || (val_ip_address.is_none() && val_ndi_name == ndi_name)
+        {
             if (val_video.is_some() || !T::IS_VIDEO) && (val_audio.is_some() || T::IS_VIDEO) {
                 gst_element_error!(
                     element,
