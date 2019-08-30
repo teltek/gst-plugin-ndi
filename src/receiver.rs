@@ -233,7 +233,7 @@ impl Observations {
             values.push(time);
 
             if let Some((num, den, b, xbase, r_squared)) =
-                calculate_linear_regression(values, Some(values_tmp))
+                gst::calculate_linear_regression(values, Some(values_tmp))
             {
                 next_mapping.xbase = xbase;
                 next_mapping.b = b;
@@ -1720,50 +1720,5 @@ impl Receiver<AudioReceiver> {
         }
 
         Ok(buffer)
-    }
-}
-
-// FIXME: Requires https://gitlab.freedesktop.org/gstreamer/gstreamer-rs/merge_requests/307
-pub fn calculate_linear_regression(
-    xy: &[(u64, u64)],
-    temp: Option<&mut [(u64, u64)]>,
-) -> Option<(u64, u64, u64, u64, f64)> {
-    unsafe {
-        use glib::translate::from_glib;
-        use std::mem;
-        use std::ptr;
-
-        assert_eq!(mem::size_of::<u64>() * 2, mem::size_of::<(u64, u64)>());
-        assert_eq!(mem::align_of::<u64>(), mem::align_of::<(u64, u64)>());
-        assert!(temp.as_ref().map(|temp| temp.len()).unwrap_or(xy.len()) >= xy.len());
-
-        let mut m_num = mem::MaybeUninit::uninit();
-        let mut m_denom = mem::MaybeUninit::uninit();
-        let mut b = mem::MaybeUninit::uninit();
-        let mut xbase = mem::MaybeUninit::uninit();
-        let mut r_squared = mem::MaybeUninit::uninit();
-
-        let res = from_glib(gst_sys::gst_calculate_linear_regression(
-            xy.as_ptr() as *const u64,
-            temp.map(|temp| temp.as_mut_ptr() as *mut u64)
-                .unwrap_or(ptr::null_mut()),
-            xy.len() as u32,
-            m_num.as_mut_ptr(),
-            m_denom.as_mut_ptr(),
-            b.as_mut_ptr(),
-            xbase.as_mut_ptr(),
-            r_squared.as_mut_ptr(),
-        ));
-        if res {
-            Some((
-                m_num.assume_init(),
-                m_denom.assume_init(),
-                b.assume_init(),
-                xbase.assume_init(),
-                r_squared.assume_init(),
-            ))
-        } else {
-            None
-        }
     }
 }
