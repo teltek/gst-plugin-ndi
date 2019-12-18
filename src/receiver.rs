@@ -1292,7 +1292,7 @@ impl Receiver<VideoReceiver> {
                 builder = builder.field_order(gst_video::VideoFieldOrder::TopFieldFirst);
             }
 
-            builder.build().ok_or_else(|| {
+            builder.build().map_err(|_| {
                 gst_element_error!(
                     element,
                     gst::StreamError::Format,
@@ -1341,7 +1341,7 @@ impl Receiver<VideoReceiver> {
                 builder = builder.field_order(gst_video::VideoFieldOrder::TopFieldFirst);
             }
 
-            builder.build().ok_or_else(|| {
+            builder.build().map_err(|_| {
                 gst_element_error!(
                     element,
                     gst::StreamError::Format,
@@ -1666,7 +1666,7 @@ impl Receiver<AudioReceiver> {
             audio_frame.no_channels() as u32,
         );
 
-        builder.build().ok_or_else(|| {
+        builder.build().map_err(|_| {
             gst_element_error!(
                 element,
                 gst::StreamError::Format,
