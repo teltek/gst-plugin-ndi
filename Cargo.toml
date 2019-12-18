@@ -15,7 +15,7 @@ gstreamer-base = "0.15"
 gstreamer-audio = "0.15"
 gstreamer-video = { version = "0.15", features = ["v1_12"] }
 lazy_static = "1.1.0"
-byte-slice-cast = "0.2.0"
+byte-slice-cast = "0.3.0"
 
 [build-dependencies]
 gst-plugin-version-helper = "0.1"
