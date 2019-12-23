@@ -217,7 +217,7 @@ impl ObjectImpl for NdiAudioSrc {
         match *prop {
             subclass::Property("ndi-name", ..) => {
                 let mut settings = self.settings.lock().unwrap();
-                let ndi_name = value.get();
+                let ndi_name = value.get().unwrap();
                 gst_debug!(
                     self.cat,
                     obj: basesrc,
@@ -229,7 +229,7 @@ impl ObjectImpl for NdiAudioSrc {
             }
             subclass::Property("ip-address", ..) => {
                 let mut settings = self.settings.lock().unwrap();
-                let ip_address = value.get();
+                let ip_address = value.get().unwrap();
                 gst_debug!(
                     self.cat,
                     obj: basesrc,
@@ -241,7 +241,7 @@ impl ObjectImpl for NdiAudioSrc {
             }
             subclass::Property("receiver-ndi-name", ..) => {
                 let mut settings = self.settings.lock().unwrap();
-                let receiver_ndi_name = value.get();
+                let receiver_ndi_name = value.get().unwrap();
                 gst_debug!(
                     self.cat,
                     obj: basesrc,
@@ -254,7 +254,7 @@ impl ObjectImpl for NdiAudioSrc {
             }
             subclass::Property("connect-timeout", ..) => {
                 let mut settings = self.settings.lock().unwrap();
-                let connect_timeout = value.get().unwrap();
+                let connect_timeout = value.get_some().unwrap();
                 gst_debug!(
                     self.cat,
                     obj: basesrc,
@@ -266,7 +266,7 @@ impl ObjectImpl for NdiAudioSrc {
             }
             subclass::Property("timeout", ..) => {
                 let mut settings = self.settings.lock().unwrap();
-                let timeout = value.get().unwrap();
+                let timeout = value.get_some().unwrap();
                 gst_debug!(
                     self.cat,
                     obj: basesrc,
@@ -278,7 +278,7 @@ impl ObjectImpl for NdiAudioSrc {
             }
             subclass::Property("bandwidth", ..) => {
                 let mut settings = self.settings.lock().unwrap();
-                let bandwidth = value.get().unwrap();
+                let bandwidth = value.get_some().unwrap();
                 gst_debug!(
                     self.cat,
                     obj: basesrc,
@@ -290,7 +290,7 @@ impl ObjectImpl for NdiAudioSrc {
             }
             subclass::Property("timestamp-mode", ..) => {
                 let mut settings = self.settings.lock().unwrap();
-                let timestamp_mode = value.get().unwrap();
+                let timestamp_mode = value.get_some().unwrap();
                 gst_debug!(
                     self.cat,
                     obj: basesrc,
@@ -518,7 +518,7 @@ impl BaseSrcImpl for NdiAudioSrc {
                 let mut state = self.state.lock().unwrap();
                 state.receiver = Some(recv);
                 if state.info.as_ref() != Some(&info) {
-                    let caps = info.to_caps().ok_or_else(|| {
+                    let caps = info.to_caps().map_err(|_| {
                         gst_element_error!(
                             element,
                             gst::ResourceError::Settings,
