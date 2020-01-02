@@ -18,8 +18,7 @@ use super::*;
 enum ReceiverInfo {
     Connecting {
         id: usize,
-        ndi_name: Option<String>,
-        ip_address: Option<String>,
+        ndi_name: String,
         video: Option<Weak<ReceiverInner<VideoReceiver>>>,
         audio: Option<Weak<ReceiverInner<AudioReceiver>>>,
         observations: Observations,
@@ -27,7 +26,6 @@ enum ReceiverInfo {
     Connected {
         id: usize,
         ndi_name: String,
-        ip_address: String,
         recv: RecvInstance,
         video: Option<Weak<ReceiverInner<VideoReceiver>>>,
         audio: Option<Weak<ReceiverInner<AudioReceiver>>>,
@@ -557,8 +555,7 @@ impl<T: ReceiverType> Drop for ReceiverInner<T> {
 pub fn connect_ndi<T: ReceiverType>(
     cat: gst::DebugCategory,
     element: &gst_base::BaseSrc,
-    ip_address: Option<&str>,
-    ndi_name: Option<&str>,
+    ndi_name: &str,
     receiver_ndi_name: &str,
     connect_timeout: u32,
     bandwidth: NDIlib_recv_bandwidth_e,
@@ -570,45 +567,33 @@ where
 {
     gst_debug!(cat, obj: element, "Starting NDI connection...");
 
-    let ip_address = ip_address.map(str::to_lowercase);
-
     let mut receivers = HASHMAP_RECEIVERS.lock().unwrap();
 
     // Check if we already have a receiver for this very stream
     for val in receivers.values_mut() {
-        let (val_audio, val_video, val_ip_address, val_ndi_name) = match val {
+        let (val_audio, val_video, val_ndi_name) = match val {
             ReceiverInfo::Connecting {
                 ref mut audio,
                 ref mut video,
-                ref ip_address,
                 ref ndi_name,
                 ..
-            } => (
-                audio,
-                video,
-                ip_address.as_ref(),
-                ndi_name.as_ref().map(String::as_ref),
-            ),
+            } => (audio, video, ndi_name.as_str()),
             ReceiverInfo::Connected {
                 ref mut audio,
                 ref mut video,
-                ref ip_address,
                 ref ndi_name,
                 ..
-            } => (audio, video, Some(ip_address), Some(ndi_name.as_str())),
+            } => (audio, video, ndi_name.as_str()),
         };
 
-        if (val_ip_address.is_some() && val_ip_address == ip_address.as_ref())
-            || (val_ip_address.is_none() && val_ndi_name == ndi_name)
-        {
+        if val_ndi_name == ndi_name {
             if (val_video.is_some() || !T::IS_VIDEO) && (val_audio.is_some() || T::IS_VIDEO) {
                 gst_element_error!(
                     element,
                     gst::ResourceError::OpenRead,
                     [
-                        "Source with ndi-name '{:?}' and ip-address '{:?}' already in use for {}",
+                        "Source with ndi-name '{}' already in use for {}",
                         val_ndi_name,
-                        val_ip_address,
                         if T::IS_VIDEO { "video" } else { "audio" }
                     ]
                 );
@@ -624,8 +609,7 @@ where
     let id_receiver = ID_RECEIVER.fetch_add(1, Ordering::SeqCst);
     let mut info = ReceiverInfo::Connecting {
         id: id_receiver,
-        ndi_name: ndi_name.map(String::from),
-        ip_address,
+        ndi_name: String::from(ndi_name),
         video: None,
         audio: None,
         observations: Observations::new(),
@@ -746,9 +730,9 @@ fn connect_ndi_async(
                 gst_debug!(
                     cat,
                     obj: element,
-                    "Found source '{}' with IP {}",
+                    "Found source '{}' with URL {}",
                     source.ndi_name(),
-                    source.ip_address(),
+                    source.url_address(),
                 );
             }
 
@@ -758,24 +742,20 @@ fn connect_ndi_async(
                 Some(val) => val,
             };
 
-            let (ndi_name, ip_address) = match info {
+            let ndi_name = match info {
                 ReceiverInfo::Connecting {
                     ref ndi_name,
-                    ref ip_address,
                     ref audio,
                     ref video,
                     ..
                 } => {
                     assert!(audio.is_some() || video.is_some());
-                    (ndi_name, ip_address)
+                    ndi_name
                 }
                 ReceiverInfo::Connected { .. } => unreachable!(),
             };
 
-            let source = sources.iter().find(|s| {
-                Some(s.ndi_name()) == ndi_name.as_ref().map(String::as_str)
-                    || Some(&s.ip_address().to_lowercase()) == ip_address.as_ref()
-            });
+            let source = sources.iter().find(|s| s.ndi_name() == ndi_name.as_str());
 
             if let Some(source) = source {
                 break source.to_owned();
@@ -793,9 +773,9 @@ fn connect_ndi_async(
     gst_debug!(
         cat,
         obj: element,
-        "Connecting to NDI source with ndi-name '{}' and ip-address '{}'",
+        "Connecting to NDI source with ndi-name '{}' and URL {}",
         source.ndi_name(),
-        source.ip_address(),
+        source.url_address(),
     );
 
     // FIXME: Ideally we would use NDIlib_recv_color_format_fastest here but that seems to be
@@ -841,7 +821,6 @@ fn connect_ndi_async(
     *info = ReceiverInfo::Connected {
         id: id_receiver,
         ndi_name: source.ndi_name().to_owned(),
-        ip_address: source.ip_address().to_lowercase(),
         recv: recv.clone(),
         video: video.clone(),
         audio: audio.clone(),
@@ -1252,15 +1231,26 @@ impl Receiver<VideoReceiver> {
     ) -> Result<gst_video::VideoInfo, gst::FlowError> {
         // YV12 and I420 are swapped in the NDI SDK compared to GStreamer
         let format = match video_frame.fourcc() {
-            ndisys::NDIlib_FourCC_type_e::NDIlib_FourCC_type_UYVY => gst_video::VideoFormat::Uyvy,
-            ndisys::NDIlib_FourCC_type_e::NDIlib_FourCC_type_YV12 => gst_video::VideoFormat::I420,
-            ndisys::NDIlib_FourCC_type_e::NDIlib_FourCC_type_NV12 => gst_video::VideoFormat::Nv12,
-            ndisys::NDIlib_FourCC_type_e::NDIlib_FourCC_type_I420 => gst_video::VideoFormat::Yv12,
-            ndisys::NDIlib_FourCC_type_e::NDIlib_FourCC_type_BGRA => gst_video::VideoFormat::Bgra,
-            ndisys::NDIlib_FourCC_type_e::NDIlib_FourCC_type_BGRX => gst_video::VideoFormat::Bgrx,
-            ndisys::NDIlib_FourCC_type_e::NDIlib_FourCC_type_RGBA => gst_video::VideoFormat::Rgba,
-            ndisys::NDIlib_FourCC_type_e::NDIlib_FourCC_type_RGBX => gst_video::VideoFormat::Rgbx,
-            ndisys::NDIlib_FourCC_type_e::NDIlib_FourCC_type_UYVA => gst_video::VideoFormat::Uyvy,
+            ndisys::NDIlib_FourCC_video_type_UYVY => gst_video::VideoFormat::Uyvy,
+            // FIXME: This drops the alpha plane!
+            ndisys::NDIlib_FourCC_video_type_UYVA => gst_video::VideoFormat::Uyvy,
+            ndisys::NDIlib_FourCC_video_type_YV12 => gst_video::VideoFormat::I420,
+            ndisys::NDIlib_FourCC_video_type_NV12 => gst_video::VideoFormat::Nv12,
+            ndisys::NDIlib_FourCC_video_type_I420 => gst_video::VideoFormat::Yv12,
+            ndisys::NDIlib_FourCC_video_type_BGRA => gst_video::VideoFormat::Bgra,
+            ndisys::NDIlib_FourCC_video_type_BGRX => gst_video::VideoFormat::Bgrx,
+            ndisys::NDIlib_FourCC_video_type_RGBA => gst_video::VideoFormat::Rgba,
+            ndisys::NDIlib_FourCC_video_type_RGBX => gst_video::VideoFormat::Rgbx,
+            _ => {
+                gst_element_error!(
+                    element,
+                    gst::StreamError::Format,
+                    ["Unsupported video fourcc {:08x}", video_frame.fourcc()]
+                );
+
+                return Err(gst::FlowError::NotNegotiated);
+            } // TODO: NDIlib_FourCC_video_type_P216 and NDIlib_FourCC_video_type_PA16 not
+              // supported by GStreamer
         };
 
         let par = gst::Fraction::approximate_f32(video_frame.picture_aspect_ratio())
@@ -1447,7 +1437,7 @@ impl Receiver<VideoReceiver> {
                 };
                 let dest_stride = vframe.plane_stride()[0] as usize;
                 let dest = vframe.plane_data_mut(0).unwrap();
-                let src_stride = video_frame.line_stride_in_bytes() as usize;
+                let src_stride = video_frame.line_stride_or_data_size_in_bytes() as usize;
                 let src = video_frame.data();
 
                 for (dest, src) in dest
@@ -1464,7 +1454,7 @@ impl Receiver<VideoReceiver> {
                     let line_bytes = vframe.width() as usize;
                     let dest_stride = vframe.plane_stride()[0] as usize;
                     let dest = vframe.plane_data_mut(0).unwrap();
-                    let src_stride = video_frame.line_stride_in_bytes() as usize;
+                    let src_stride = video_frame.line_stride_or_data_size_in_bytes() as usize;
                     let src = video_frame.data();
 
                     for (dest, src) in dest
@@ -1480,7 +1470,7 @@ impl Receiver<VideoReceiver> {
                     let line_bytes = vframe.width() as usize;
                     let dest_stride = vframe.plane_stride()[1] as usize;
                     let dest = vframe.plane_data_mut(1).unwrap();
-                    let src_stride = video_frame.line_stride_in_bytes() as usize;
+                    let src_stride = video_frame.line_stride_or_data_size_in_bytes() as usize;
                     let src = &video_frame.data()[(video_frame.yres() as usize * src_stride)..];
 
                     for (dest, src) in dest
@@ -1497,7 +1487,7 @@ impl Receiver<VideoReceiver> {
                     let line_bytes = vframe.width() as usize;
                     let dest_stride = vframe.plane_stride()[0] as usize;
                     let dest = vframe.plane_data_mut(0).unwrap();
-                    let src_stride = video_frame.line_stride_in_bytes() as usize;
+                    let src_stride = video_frame.line_stride_or_data_size_in_bytes() as usize;
                     let src = video_frame.data();
 
                     for (dest, src) in dest
@@ -1513,8 +1503,8 @@ impl Receiver<VideoReceiver> {
                     let line_bytes = (vframe.width() as usize + 1) / 2;
                     let dest_stride = vframe.plane_stride()[1] as usize;
                     let dest = vframe.plane_data_mut(1).unwrap();
-                    let src_stride = video_frame.line_stride_in_bytes() as usize;
-                    let src_stride1 = video_frame.line_stride_in_bytes() as usize / 2;
+                    let src_stride = video_frame.line_stride_or_data_size_in_bytes() as usize;
+                    let src_stride1 = video_frame.line_stride_or_data_size_in_bytes() as usize / 2;
                     let src = &video_frame.data()[(video_frame.yres() as usize * src_stride)..];
 
                     for (dest, src) in dest
@@ -1530,8 +1520,8 @@ impl Receiver<VideoReceiver> {
                     let line_bytes = (vframe.width() as usize + 1) / 2;
                     let dest_stride = vframe.plane_stride()[2] as usize;
                     let dest = vframe.plane_data_mut(2).unwrap();
-                    let src_stride = video_frame.line_stride_in_bytes() as usize;
-                    let src_stride1 = video_frame.line_stride_in_bytes() as usize / 2;
+                    let src_stride = video_frame.line_stride_or_data_size_in_bytes() as usize;
+                    let src_stride1 = video_frame.line_stride_or_data_size_in_bytes() as usize / 2;
                     let src = &video_frame.data()[(video_frame.yres() as usize * src_stride
                         + (video_frame.yres() as usize + 1) / 2 * src_stride1)..];
 

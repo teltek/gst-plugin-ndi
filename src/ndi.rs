@@ -1,3 +1,4 @@
+use crate::ndisys;
 use crate::ndisys::*;
 use std::ffi;
 use std::mem;
@@ -135,15 +136,15 @@ impl<'a> Source<'a> {
         }
     }
 
-    pub fn ip_address(&self) -> &str {
+    pub fn url_address(&self) -> &str {
         unsafe {
             let ptr = match *self {
                 Source::Borrowed(ptr, _) => &*ptr.as_ptr(),
                 Source::Owned(ref source, _, _) => source,
             };
 
-            assert!(!ptr.p_ip_address.is_null());
-            ffi::CStr::from_ptr(ptr.p_ip_address).to_str().unwrap()
+            assert!(!ptr.p_url_address.is_null());
+            ffi::CStr::from_ptr(ptr.p_url_address).to_str().unwrap()
         }
     }
 
@@ -156,34 +157,35 @@ impl<'a> Source<'a> {
         }
     }
 
-    fn ip_address_ptr(&self) -> *const ::std::os::raw::c_char {
+    fn url_address_ptr(&self) -> *const ::std::os::raw::c_char {
         unsafe {
             match *self {
-                Source::Borrowed(ptr, _) => ptr.as_ref().p_ip_address,
-                Source::Owned(_, _, ref ip_address) => ip_address.as_ptr(),
+                Source::Borrowed(ptr, _) => ptr.as_ref().p_url_address,
+                Source::Owned(_, _, ref url_address) => url_address.as_ptr(),
             }
         }
     }
 
     pub fn to_owned<'b>(&self) -> Source<'b> {
         unsafe {
-            let (ndi_name, ip_address) = match *self {
-                Source::Borrowed(ptr, _) => (ptr.as_ref().p_ndi_name, ptr.as_ref().p_ip_address),
-                Source::Owned(_, ref ndi_name, ref ip_address) => {
-                    (ndi_name.as_ptr(), ip_address.as_ptr())
+            let (ndi_name, url_address) = match *self {
+                Source::Borrowed(ptr, _) => (ptr.as_ref().p_ndi_name, ptr.as_ref().p_url_address),
+                Source::Owned(_, ref ndi_name, ref url_address) => {
+                    (ndi_name.as_ptr(), url_address.as_ptr())
                 }
             };
 
             let ndi_name = ffi::CString::new(ffi::CStr::from_ptr(ndi_name).to_bytes()).unwrap();
-            let ip_address = ffi::CString::new(ffi::CStr::from_ptr(ip_address).to_bytes()).unwrap();
+            let url_address =
+                ffi::CString::new(ffi::CStr::from_ptr(url_address).to_bytes()).unwrap();
 
             Source::Owned(
                 NDIlib_source_t {
                     p_ndi_name: ndi_name.as_ptr(),
-                    p_ip_address: ip_address.as_ptr(),
+                    p_url_address: url_address.as_ptr(),
                 },
                 ndi_name,
-                ip_address,
+                url_address,
             )
         }
     }
@@ -223,12 +225,12 @@ impl<'a> RecvBuilder<'a> {
             let ptr = NDIlib_recv_create_v3(&NDIlib_recv_create_v3_t {
                 source_to_connect_to: NDIlib_source_t {
                     p_ndi_name: self.source_to_connect_to.ndi_name_ptr(),
-                    p_ip_address: self.source_to_connect_to.ip_address_ptr(),
+                    p_url_address: self.source_to_connect_to.url_address_ptr(),
                 },
                 allow_video_fields: self.allow_video_fields,
                 bandwidth: self.bandwidth,
                 color_format: self.color_format,
-                p_ndi_name: ndi_name.as_ptr(),
+                p_ndi_recv_name: ndi_name.as_ptr(),
             });
 
             if ptr.is_null() {
@@ -410,7 +412,7 @@ impl<'a> VideoFrame<'a> {
         }
     }
 
-    pub fn fourcc(&self) -> NDIlib_FourCC_type_e {
+    pub fn fourcc(&self) -> NDIlib_FourCC_video_type_e {
         match self {
             VideoFrame::Borrowed(ref frame, _) => frame.FourCC,
         }
@@ -448,9 +450,9 @@ impl<'a> VideoFrame<'a> {
             || self.frame_format_type()
                 == NDIlib_frame_format_type_e::NDIlib_frame_format_type_field_1
         {
-            self.yres() * self.line_stride_in_bytes() / 2
+            self.yres() * self.line_stride_or_data_size_in_bytes() / 2
         } else {
-            self.yres() * self.line_stride_in_bytes()
+            self.yres() * self.line_stride_or_data_size_in_bytes()
         };
 
         unsafe {
@@ -463,9 +465,32 @@ impl<'a> VideoFrame<'a> {
         }
     }
 
-    pub fn line_stride_in_bytes(&self) -> i32 {
+    pub fn line_stride_or_data_size_in_bytes(&self) -> i32 {
         match self {
-            VideoFrame::Borrowed(ref frame, _) => frame.line_stride_in_bytes,
+            VideoFrame::Borrowed(ref frame, _) => {
+                let stride = frame.line_stride_or_data_size_in_bytes;
+
+                if stride != 0 {
+                    return stride;
+                }
+
+                let xres = frame.xres;
+
+                match frame.FourCC {
+                    ndisys::NDIlib_FourCC_video_type_UYVY
+                    | ndisys::NDIlib_FourCC_video_type_UYVA
+                    | ndisys::NDIlib_FourCC_video_type_YV12
+                    | ndisys::NDIlib_FourCC_video_type_NV12
+                    | ndisys::NDIlib_FourCC_video_type_I420
+                    | ndisys::NDIlib_FourCC_video_type_BGRA
+                    | ndisys::NDIlib_FourCC_video_type_BGRX
+                    | ndisys::NDIlib_FourCC_video_type_RGBA
+                    | ndisys::NDIlib_FourCC_video_type_RGBX => xres,
+                    ndisys::NDIlib_FourCC_video_type_P216
+                    | ndisys::NDIlib_FourCC_video_type_PA16 => 2 * xres,
+                    _ => 0,
+                }
+            }
         }
     }
 
