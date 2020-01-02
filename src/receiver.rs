@@ -860,7 +860,7 @@ fn connect_ndi_async(
     if let Some(video) = video.and_then(|v| v.upgrade()).map(Receiver) {
         let mut video_recv = video.0.recv.lock().unwrap();
         assert!(video_recv.is_none());
-        *video_recv = Some(recv.clone());
+        *video_recv = Some(recv);
         video.0.recv_cond.notify_one();
     }
 
@@ -1264,7 +1264,7 @@ impl Receiver<VideoReceiver> {
         };
 
         let par = gst::Fraction::approximate_f32(video_frame.picture_aspect_ratio())
-            .unwrap_or(gst::Fraction::new(1, 1))
+            .unwrap_or_else(|| gst::Fraction::new(1, 1))
             * gst::Fraction::new(video_frame.yres(), video_frame.xres());
 
         #[cfg(feature = "interlaced-fields")]

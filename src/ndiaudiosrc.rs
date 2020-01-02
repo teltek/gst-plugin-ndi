@@ -526,7 +526,7 @@ impl BaseSrcImpl for NdiAudioSrc {
                         );
                         gst::FlowError::NotNegotiated
                     })?;
-                    state.info = Some(info.clone());
+                    state.info = Some(info);
                     state.current_latency = buffer.get_duration();
                     drop(state);
                     gst_debug!(self.cat, obj: element, "Configuring for caps {}", caps);
