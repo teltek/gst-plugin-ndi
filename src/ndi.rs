@@ -122,6 +122,7 @@ pub enum Source<'a> {
 }
 
 unsafe impl<'a> Send for Source<'a> {}
+unsafe impl<'a> Sync for Source<'a> {}
 
 impl<'a> Source<'a> {
     pub fn ndi_name(&self) -> &str {
@@ -188,6 +189,12 @@ impl<'a> Source<'a> {
                 url_address,
             )
         }
+    }
+}
+
+impl<'a> PartialEq for Source<'a> {
+    fn eq(&self, other: &Source<'a>) -> bool {
+        self.ndi_name() == other.ndi_name() && self.url_address() == other.url_address()
     }
 }
 
