@@ -61,7 +61,7 @@ static PROPERTIES: [subclass::Property; 7] = [
         glib::ParamSpec::string(
             name,
             "URL/Address",
-            "URL/address and port of the sender, e.g. 127.0.0.1:5961. This is used as an additional filter together with the NDI name.",
+            "URL/address and port of the sender, e.g. 127.0.0.1:5961",
             None,
             glib::ParamFlags::READWRITE,
         )
@@ -436,17 +436,17 @@ impl BaseSrcImpl for NdiVideoSrc {
         *self.state.lock().unwrap() = Default::default();
         let settings = self.settings.lock().unwrap().clone();
 
-        if settings.ndi_name.is_none() {
+        if settings.ndi_name.is_none() && settings.url_address.is_none() {
             return Err(gst_error_msg!(
                 gst::LibraryError::Settings,
-                ["No NDI name given"]
+                ["No NDI name or URL/address given"]
             ));
         }
 
         let receiver = connect_ndi(
             self.cat,
             element,
-            settings.ndi_name.as_ref().unwrap().as_str(),
+            settings.ndi_name.as_ref().map(String::as_str),
             settings.url_address.as_ref().map(String::as_str),
             &settings.receiver_ndi_name,
             settings.connect_timeout,
@@ -501,6 +501,8 @@ impl BaseSrcImpl for NdiVideoSrc {
                     };
 
                     let max = 5 * state.current_latency;
+
+                    println!("Returning latency min {} max {}", min, max,);
 
                     gst_debug!(
                         self.cat,

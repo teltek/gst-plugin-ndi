@@ -182,7 +182,8 @@ impl<'a> PartialEq for Source<'a> {
 
 #[derive(Debug)]
 pub struct RecvBuilder<'a> {
-    source_to_connect_to: (&'a str, Option<&'a str>),
+    ndi_name: Option<&'a str>,
+    url_address: Option<&'a str>,
     allow_video_fields: bool,
     bandwidth: NDIlib_recv_bandwidth_e,
     color_format: NDIlib_recv_color_format_e,
@@ -211,15 +212,20 @@ impl<'a> RecvBuilder<'a> {
     pub fn build(self) -> Option<RecvInstance> {
         unsafe {
             let ndi_recv_name = ffi::CString::new(self.ndi_recv_name).unwrap();
-            let ndi_name = ffi::CString::new(self.source_to_connect_to.0).unwrap();
+            let ndi_name = self
+                .ndi_name
+                .as_ref()
+                .map(|s| ffi::CString::new(*s).unwrap());
             let url_address = self
-                .source_to_connect_to
-                .1
+                .url_address
                 .as_ref()
                 .map(|s| ffi::CString::new(*s).unwrap());
             let ptr = NDIlib_recv_create_v3(&NDIlib_recv_create_v3_t {
                 source_to_connect_to: NDIlib_source_t {
-                    p_ndi_name: ndi_name.as_ptr(),
+                    p_ndi_name: ndi_name
+                        .as_ref()
+                        .map(|s| s.as_ptr())
+                        .unwrap_or_else(|| ptr::null_mut()),
                     p_url_address: url_address
                         .as_ref()
                         .map(|s| s.as_ptr())
@@ -258,11 +264,13 @@ unsafe impl Sync for RecvInstanceInner {}
 
 impl RecvInstance {
     pub fn builder<'a>(
-        source_to_connect_to: (&'a str, Option<&'a str>),
+        ndi_name: Option<&'a str>,
+        url_address: Option<&'a str>,
         ndi_recv_name: &'a str,
     ) -> RecvBuilder<'a> {
         RecvBuilder {
-            source_to_connect_to,
+            ndi_name,
+            url_address,
             allow_video_fields: true,
             bandwidth: NDIlib_recv_bandwidth_highest,
             color_format: NDIlib_recv_color_format_e::NDIlib_recv_color_format_UYVY_BGRA,

@@ -17,7 +17,7 @@ use super::*;
 
 pub struct ReceiverInfo {
     id: usize,
-    ndi_name: String,
+    ndi_name: Option<String>,
     url_address: Option<String>,
     recv: RecvInstance,
     video: Option<Weak<ReceiverInner<VideoReceiver>>>,
@@ -521,7 +521,7 @@ impl<T: ReceiverType> Drop for ReceiverInner<T> {
 pub fn connect_ndi<T: ReceiverType>(
     cat: gst::DebugCategory,
     element: &gst_base::BaseSrc,
-    ndi_name: &str,
+    ndi_name: Option<&str>,
     url_address: Option<&str>,
     receiver_ndi_name: &str,
     connect_timeout: u32,
@@ -534,12 +534,24 @@ where
 {
     gst_debug!(cat, obj: element, "Starting NDI connection...");
 
+    assert!(ndi_name.is_some() || url_address.is_some());
+
     let mut receivers = HASHMAP_RECEIVERS.lock().unwrap();
 
     // Check if we already have a receiver for this very stream
     for receiver in receivers.values_mut() {
-        if receiver.ndi_name == ndi_name
-            && receiver.url_address.as_ref().map(String::as_str) == url_address
+        // If both are provided they both must match, if only one is provided
+        // then that one has to match and the other one does not matter
+        if (ndi_name.is_some()
+            && url_address.is_some()
+            && receiver.ndi_name.as_ref().map(String::as_str) == ndi_name
+            && receiver.url_address.as_ref().map(String::as_str) == url_address)
+            || (ndi_name.is_some()
+                && url_address.is_none()
+                && receiver.ndi_name.as_ref().map(String::as_str) == ndi_name)
+            || (ndi_name.is_none()
+                && url_address.is_some()
+                && receiver.url_address.as_ref().map(String::as_str) == url_address)
         {
             if (receiver.video.is_some() || !T::IS_VIDEO)
                 && (receiver.audio.is_some() || T::IS_VIDEO)
@@ -548,8 +560,9 @@ where
                     element,
                     gst::ResourceError::OpenRead,
                     [
-                        "Source with ndi-name '{}' already in use for {}",
+                        "Source with NDI name '{:?}' / URL/address '{:?}' already in use for {}",
                         receiver.ndi_name,
+                        receiver.url_address,
                         if T::IS_VIDEO { "video" } else { "audio" }
                     ]
                 );
@@ -572,14 +585,14 @@ where
     gst_debug!(
         cat,
         obj: element,
-        "Connecting to NDI source with ndi-name '{}' and URL/Address {:?}",
+        "Connecting to NDI source with NDI name '{:?}' and URL/Address {:?}",
         ndi_name,
         url_address,
     );
 
     // FIXME: Ideally we would use NDIlib_recv_color_format_fastest here but that seems to be
     // broken with interlaced content currently
-    let recv = RecvInstance::builder((ndi_name, url_address), &receiver_ndi_name)
+    let recv = RecvInstance::builder(ndi_name, url_address, &receiver_ndi_name)
         .bandwidth(bandwidth)
         .color_format(NDIlib_recv_color_format_e::NDIlib_recv_color_format_UYVY_BGRA)
         .allow_video_fields(true)
@@ -604,7 +617,7 @@ where
     let id_receiver = ID_RECEIVER.fetch_add(1, Ordering::SeqCst);
     let mut info = ReceiverInfo {
         id: id_receiver,
-        ndi_name: String::from(ndi_name),
+        ndi_name: ndi_name.map(String::from),
         url_address: url_address.map(String::from),
         recv,
         video: None,
