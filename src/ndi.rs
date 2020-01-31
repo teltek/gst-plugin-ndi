@@ -122,6 +122,7 @@ pub enum Source<'a> {
 }
 
 unsafe impl<'a> Send for Source<'a> {}
+unsafe impl<'a> Sync for Source<'a> {}
 
 impl<'a> Source<'a> {
     pub fn ndi_name(&self) -> &str {
@@ -145,24 +146,6 @@ impl<'a> Source<'a> {
 
             assert!(!ptr.p_url_address.is_null());
             ffi::CStr::from_ptr(ptr.p_url_address).to_str().unwrap()
-        }
-    }
-
-    fn ndi_name_ptr(&self) -> *const ::std::os::raw::c_char {
-        unsafe {
-            match *self {
-                Source::Borrowed(ptr, _) => ptr.as_ref().p_ndi_name,
-                Source::Owned(_, ref ndi_name, _) => ndi_name.as_ptr(),
-            }
-        }
-    }
-
-    fn url_address_ptr(&self) -> *const ::std::os::raw::c_char {
-        unsafe {
-            match *self {
-                Source::Borrowed(ptr, _) => ptr.as_ref().p_url_address,
-                Source::Owned(_, _, ref url_address) => url_address.as_ptr(),
-            }
         }
     }
 
@@ -191,13 +174,20 @@ impl<'a> Source<'a> {
     }
 }
 
+impl<'a> PartialEq for Source<'a> {
+    fn eq(&self, other: &Source<'a>) -> bool {
+        self.ndi_name() == other.ndi_name() && self.url_address() == other.url_address()
+    }
+}
+
 #[derive(Debug)]
 pub struct RecvBuilder<'a> {
-    source_to_connect_to: &'a Source<'a>,
+    ndi_name: Option<&'a str>,
+    url_address: Option<&'a str>,
     allow_video_fields: bool,
     bandwidth: NDIlib_recv_bandwidth_e,
     color_format: NDIlib_recv_color_format_e,
-    ndi_name: &'a str,
+    ndi_recv_name: &'a str,
 }
 
 impl<'a> RecvBuilder<'a> {
@@ -221,16 +211,30 @@ impl<'a> RecvBuilder<'a> {
 
     pub fn build(self) -> Option<RecvInstance> {
         unsafe {
-            let ndi_name = ffi::CString::new(self.ndi_name).unwrap();
+            let ndi_recv_name = ffi::CString::new(self.ndi_recv_name).unwrap();
+            let ndi_name = self
+                .ndi_name
+                .as_ref()
+                .map(|s| ffi::CString::new(*s).unwrap());
+            let url_address = self
+                .url_address
+                .as_ref()
+                .map(|s| ffi::CString::new(*s).unwrap());
             let ptr = NDIlib_recv_create_v3(&NDIlib_recv_create_v3_t {
                 source_to_connect_to: NDIlib_source_t {
-                    p_ndi_name: self.source_to_connect_to.ndi_name_ptr(),
-                    p_url_address: self.source_to_connect_to.url_address_ptr(),
+                    p_ndi_name: ndi_name
+                        .as_ref()
+                        .map(|s| s.as_ptr())
+                        .unwrap_or_else(|| ptr::null_mut()),
+                    p_url_address: url_address
+                        .as_ref()
+                        .map(|s| s.as_ptr())
+                        .unwrap_or_else(|| ptr::null_mut()),
                 },
                 allow_video_fields: self.allow_video_fields,
                 bandwidth: self.bandwidth,
                 color_format: self.color_format,
-                p_ndi_recv_name: ndi_name.as_ptr(),
+                p_ndi_recv_name: ndi_recv_name.as_ptr(),
             });
 
             if ptr.is_null() {
@@ -259,13 +263,18 @@ unsafe impl Send for RecvInstanceInner {}
 unsafe impl Sync for RecvInstanceInner {}
 
 impl RecvInstance {
-    pub fn builder<'a>(source_to_connect_to: &'a Source, ndi_name: &'a str) -> RecvBuilder<'a> {
+    pub fn builder<'a>(
+        ndi_name: Option<&'a str>,
+        url_address: Option<&'a str>,
+        ndi_recv_name: &'a str,
+    ) -> RecvBuilder<'a> {
         RecvBuilder {
-            source_to_connect_to,
+            ndi_name,
+            url_address,
             allow_video_fields: true,
             bandwidth: NDIlib_recv_bandwidth_highest,
             color_format: NDIlib_recv_color_format_e::NDIlib_recv_color_format_UYVY_BGRA,
-            ndi_name,
+            ndi_recv_name,
         }
     }
 

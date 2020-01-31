@@ -11,6 +11,7 @@ extern crate gstreamer_video as gst_video;
 extern crate lazy_static;
 extern crate byte_slice_cast;
 
+mod device_provider;
 pub mod ndi;
 mod ndiaudiosrc;
 pub mod ndisys;
@@ -39,6 +40,7 @@ fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
 
     ndivideosrc::register(plugin)?;
     ndiaudiosrc::register(plugin)?;
+    device_provider::register(plugin)?;
     Ok(())
 }
 
