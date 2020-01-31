@@ -1,7 +1,7 @@
 GStreamer NDI Plugin for Linux
 ====================
 
-*Compiled and tested with Ubuntu 16.04.5, GStreamer 1.12 and NDI SDK 3.5.1*
+*Compiled and tested with NDI SDK 3.5, 3.8, 4.0 and 4.1*
 
 This is a plugin for the [GStreamer](https://gstreamer.freedesktop.org/) multimedia framework that allows GStreamer to receive a stream from a [NDI](https://www.newtek.com/ndi/) source. This plugin has been developed by [Teltek](http://teltek.es/) and was funded by the [University of the Arts London](https://www.arts.ac.uk/) and [The University of Manchester](https://www.manchester.ac.uk/).
 

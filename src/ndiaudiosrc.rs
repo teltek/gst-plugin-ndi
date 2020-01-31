@@ -24,7 +24,6 @@ use crate::DEFAULT_RECEIVER_NDI_NAME;
 #[derive(Debug, Clone)]
 struct Settings {
     ndi_name: Option<String>,
-    ip_address: Option<String>,
     connect_timeout: u32,
     timeout: u32,
     receiver_ndi_name: String,
@@ -36,7 +35,6 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             ndi_name: None,
-            ip_address: None,
             receiver_ndi_name: DEFAULT_RECEIVER_NDI_NAME.clone(),
             connect_timeout: 10000,
             timeout: 5000,
@@ -46,21 +44,12 @@ impl Default for Settings {
     }
 }
 
-static PROPERTIES: [subclass::Property; 7] = [
+static PROPERTIES: [subclass::Property; 6] = [
     subclass::Property("ndi-name", |name| {
         glib::ParamSpec::string(
             name,
             "NDI Name",
             "NDI stream name of the sender",
-            None,
-            glib::ParamFlags::READWRITE,
-        )
-    }),
-    subclass::Property("ip-address", |name| {
-        glib::ParamSpec::string(
-            name,
-            "IP Address",
-            "IP address and port of the sender, e.g. 127.0.0.1:5961",
             None,
             glib::ParamFlags::READWRITE,
         )
@@ -227,18 +216,6 @@ impl ObjectImpl for NdiAudioSrc {
                 );
                 settings.ndi_name = ndi_name;
             }
-            subclass::Property("ip-address", ..) => {
-                let mut settings = self.settings.lock().unwrap();
-                let ip_address = value.get().unwrap();
-                gst_debug!(
-                    self.cat,
-                    obj: basesrc,
-                    "Changing ip from {:?} to {:?}",
-                    settings.ip_address,
-                    ip_address,
-                );
-                settings.ip_address = ip_address;
-            }
             subclass::Property("receiver-ndi-name", ..) => {
                 let mut settings = self.settings.lock().unwrap();
                 let receiver_ndi_name = value.get().unwrap();
@@ -315,10 +292,6 @@ impl ObjectImpl for NdiAudioSrc {
             subclass::Property("ndi-name", ..) => {
                 let settings = self.settings.lock().unwrap();
                 Ok(settings.ndi_name.to_value())
-            }
-            subclass::Property("ip-address", ..) => {
-                let settings = self.settings.lock().unwrap();
-                Ok(settings.ip_address.to_value())
             }
             subclass::Property("receiver-ndi-name", ..) => {
                 let settings = self.settings.lock().unwrap();
@@ -401,18 +374,19 @@ impl BaseSrcImpl for NdiAudioSrc {
         *self.state.lock().unwrap() = Default::default();
         let settings = self.settings.lock().unwrap().clone();
 
-        if settings.ip_address.is_none() && settings.ndi_name.is_none() {
+        let ndi_name = if let Some(ref ndi_name) = settings.ndi_name {
+            ndi_name
+        } else {
             return Err(gst_error_msg!(
                 gst::LibraryError::Settings,
                 ["No IP address or NDI name given"]
             ));
-        }
+        };
 
         let receiver = connect_ndi(
             self.cat,
             element,
-            settings.ip_address.as_ref().map(String::as_str),
-            settings.ndi_name.as_ref().map(String::as_str),
+            ndi_name,
             &settings.receiver_ndi_name,
             settings.connect_timeout,
             settings.bandwidth,
@@ -526,7 +500,7 @@ impl BaseSrcImpl for NdiAudioSrc {
                         );
                         gst::FlowError::NotNegotiated
                     })?;
-                    state.info = Some(info.clone());
+                    state.info = Some(info);
                     state.current_latency = buffer.get_duration();
                     drop(state);
                     gst_debug!(self.cat, obj: element, "Configuring for caps {}", caps);
