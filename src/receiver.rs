@@ -1012,7 +1012,7 @@ impl Receiver<VideoReceiver> {
 
         #[cfg(feature = "interlaced-fields")]
         {
-            let mut builder = gst_video::VideoInfo::new(
+            let mut builder = gst_video::VideoInfo::builder(
                 format,
                 video_frame.xres() as u32,
                 video_frame.yres() as u32,
@@ -1061,7 +1061,7 @@ impl Receiver<VideoReceiver> {
                 return Err(gst::FlowError::NotNegotiated);
             }
 
-            let mut builder = gst_video::VideoInfo::new(
+            let mut builder = gst_video::VideoInfo::builder(
                 format,
                 video_frame.xres() as u32,
                 video_frame.yres() as u32,
@@ -1410,7 +1410,7 @@ impl Receiver<AudioReceiver> {
         element: &gst_base::BaseSrc,
         audio_frame: &AudioFrame,
     ) -> Result<gst_audio::AudioInfo, gst::FlowError> {
-        let builder = gst_audio::AudioInfo::new(
+        let builder = gst_audio::AudioInfo::builder(
             gst_audio::AUDIO_FORMAT_S16,
             audio_frame.sample_rate() as u32,
             audio_frame.no_channels() as u32,

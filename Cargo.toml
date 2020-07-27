@@ -8,18 +8,18 @@ description = "NewTek NDI Plugin"
 edition = "2018"
 
 [dependencies]
-glib = "0.9"
-gobject-sys = "0.9"
-gstreamer = { version = "0.15", features = ["v1_12"] }
-gstreamer-base = "0.15"
-gstreamer-audio = "0.15"
-gstreamer-video = { version = "0.15", features = ["v1_12"] }
+glib = "0.10"
+gobject-sys = "0.10"
+gstreamer = { version = "0.16", features = ["v1_12"] }
+gstreamer-base = "0.16"
+gstreamer-audio = "0.16"
+gstreamer-video = { version = "0.16", features = ["v1_12"] }
 lazy_static = "1.1.0"
 byte-slice-cast = "0.3.0"
 once_cell = "1.0"
 
 [build-dependencies]
-gst-plugin-version-helper = "0.1"
+gst-plugin-version-helper = "0.2"
 
 [features]
 default = ["interlaced-fields", "reference-timestamps"]
