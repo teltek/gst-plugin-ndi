@@ -11,6 +11,8 @@ use gst_video;
 use std::sync::Mutex;
 use std::{i32, u32};
 
+use gst_base::subclass::base_src::CreateSuccess;
+
 use crate::ndisys;
 
 use crate::connect_ndi;
@@ -334,8 +336,8 @@ impl ObjectImpl for NdiVideoSrc {
                     timestamp_mode
                 );
                 if settings.timestamp_mode != timestamp_mode {
-                    let _ = basesrc
-                        .post_message(&gst::Message::new_latency().src(Some(basesrc)).build());
+                    let message = gst::message::Latency::builder().src(basesrc).build();
+                    let _ = basesrc.post_message(message);
                 }
                 settings.timestamp_mode = timestamp_mode;
             }
@@ -521,8 +523,8 @@ impl BaseSrcImpl for NdiVideoSrc {
         }
     }
 
-    fn fixate(&self, element: &gst_base::BaseSrc, caps: gst::Caps) -> gst::Caps {
-        let mut caps = gst::Caps::truncate(caps);
+    fn fixate(&self, element: &gst_base::BaseSrc, mut caps: gst::Caps) -> gst::Caps {
+        gst::Caps::truncate(&mut caps);
         {
             let caps = caps.make_mut();
             let s = caps.get_mut_structure(0).unwrap();
@@ -541,8 +543,9 @@ impl BaseSrcImpl for NdiVideoSrc {
         &self,
         element: &gst_base::BaseSrc,
         _offset: u64,
+        _buffer: Option<&mut gst::BufferRef>,
         _length: u32,
-    ) -> Result<gst::Buffer, gst::FlowError> {
+    ) -> Result<CreateSuccess, gst::FlowError> {
         let recv = {
             let mut state = self.state.lock().unwrap();
             match state.receiver.take() {
@@ -579,12 +582,11 @@ impl BaseSrcImpl for NdiVideoSrc {
                         );
                         gst::FlowError::NotNegotiated
                     })?;
-
-                    let _ = element
-                        .post_message(&gst::Message::new_latency().src(Some(element)).build());
+                    let message = gst::message::Latency::builder().src(element).build();
+                    let _ = element.post_message(message);
                 }
 
-                Ok(buffer)
+                Ok(CreateSuccess::FilledBuffer)
             }
             ReceiverItem::Timeout => Err(gst::FlowError::Eos),
             ReceiverItem::Flushing => Err(gst::FlowError::Flushing),
