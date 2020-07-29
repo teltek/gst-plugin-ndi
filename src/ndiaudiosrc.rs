@@ -502,7 +502,7 @@ impl BaseSrcImpl for NdiAudioSrc {
         &self,
         element: &gst_base::BaseSrc,
         _offset: u64,
-        _buffer: Option<&mut gst::BufferRef>,
+        _buf: Option<&mut gst::BufferRef>,
         _length: u32,
     ) -> Result<CreateSuccess, gst::FlowError> {
         let recv = {
@@ -545,7 +545,7 @@ impl BaseSrcImpl for NdiAudioSrc {
                     let _ = element.post_message(message);
                 }
 
-                Ok(CreateSuccess::FilledBuffer)
+                Ok(CreateSuccess::NewBuffer(buffer))
             }
             ReceiverItem::Flushing => Err(gst::FlowError::Flushing),
             ReceiverItem::Timeout => Err(gst::FlowError::Eos),

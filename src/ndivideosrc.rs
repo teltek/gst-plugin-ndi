@@ -543,9 +543,10 @@ impl BaseSrcImpl for NdiVideoSrc {
         &self,
         element: &gst_base::BaseSrc,
         _offset: u64,
-        _buffer: Option<&mut gst::BufferRef>,
+        _buf: Option<&mut gst::BufferRef>,
         _length: u32,
     ) -> Result<CreateSuccess, gst::FlowError> {
+
         let recv = {
             let mut state = self.state.lock().unwrap();
             match state.receiver.take() {
@@ -585,13 +586,13 @@ impl BaseSrcImpl for NdiVideoSrc {
                     let message = gst::message::Latency::builder().src(element).build();
                     let _ = element.post_message(message);
                 }
-
-                Ok(CreateSuccess::FilledBuffer)
+                Ok(CreateSuccess::NewBuffer(buffer))
             }
             ReceiverItem::Timeout => Err(gst::FlowError::Eos),
             ReceiverItem::Flushing => Err(gst::FlowError::Flushing),
             ReceiverItem::Error(err) => Err(err),
         }
+
     }
 }
 
