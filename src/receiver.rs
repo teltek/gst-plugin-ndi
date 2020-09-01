@@ -907,7 +907,7 @@ impl Receiver<VideoReceiver> {
                     );
                     return Err(gst::FlowError::Error);
                 }
-                Ok(None) if timer.elapsed().as_millis() >= timeout as u128 => {
+                Ok(None) if timeout > 0 && timer.elapsed().as_millis() >= timeout as u128 => {
                     gst_debug!(self.0.cat, obj: element, "Timed out -- assuming EOS",);
                     return Err(gst::FlowError::Eos);
                 }
@@ -1335,7 +1335,7 @@ impl Receiver<AudioReceiver> {
                     );
                     return Err(gst::FlowError::Error);
                 }
-                Ok(None) if timer.elapsed().as_millis() >= timeout as u128 => {
+                Ok(None) if timeout > 0 && timer.elapsed().as_millis() >= timeout as u128 => {
                     gst_debug!(self.0.cat, obj: element, "Timed out -- assuming EOS",);
                     return Err(gst::FlowError::Eos);
                 }
