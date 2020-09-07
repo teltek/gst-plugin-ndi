@@ -56,10 +56,8 @@ lazy_static! {
 
 #[cfg(feature = "reference-timestamps")]
 lazy_static! {
-    static ref TIMECODE_CAPS: gst::Caps =
-        { gst::Caps::new_simple("timestamp/x-ndi-timecode", &[]) };
-    static ref TIMESTAMP_CAPS: gst::Caps =
-        { gst::Caps::new_simple("timestamp/x-ndi-timestamp", &[]) };
+    static ref TIMECODE_CAPS: gst::Caps = gst::Caps::new_simple("timestamp/x-ndi-timecode", &[]);
+    static ref TIMESTAMP_CAPS: gst::Caps = gst::Caps::new_simple("timestamp/x-ndi-timestamp", &[]);
 }
 
 impl glib::translate::ToGlib for TimestampMode {
