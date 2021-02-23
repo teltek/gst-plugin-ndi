@@ -1,14 +1,10 @@
-use glib;
 use glib::subclass;
-use gst;
 use gst::prelude::*;
 use gst::subclass::prelude::*;
 use gst::{gst_debug, gst_element_error, gst_error, gst_error_msg};
-use gst_base;
 use gst_base::prelude::*;
 use gst_base::subclass::base_src::CreateSuccess;
 use gst_base::subclass::prelude::*;
-use gst_video;
 
 use std::sync::Mutex;
 use std::{i32, u32};
@@ -448,8 +444,8 @@ impl BaseSrcImpl for NdiVideoSrc {
         let receiver = connect_ndi(
             self.cat,
             element,
-            settings.ndi_name.as_ref().map(String::as_str),
-            settings.url_address.as_ref().map(String::as_str),
+            settings.ndi_name.as_deref(),
+            settings.url_address.as_deref(),
             &settings.receiver_ndi_name,
             settings.connect_timeout,
             settings.bandwidth,

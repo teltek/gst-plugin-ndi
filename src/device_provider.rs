@@ -1,6 +1,4 @@
-use glib;
 use glib::subclass;
-use gst;
 use gst::prelude::*;
 use gst::subclass::prelude::*;
 use gst::{gst_error, gst_log, gst_trace};

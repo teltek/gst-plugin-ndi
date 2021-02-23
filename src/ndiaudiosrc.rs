@@ -1,11 +1,7 @@
-use glib;
 use glib::subclass;
-use gst;
 use gst::prelude::*;
 use gst::subclass::prelude::*;
 use gst::{gst_debug, gst_element_error, gst_error, gst_error_msg};
-use gst_audio;
-use gst_base;
 use gst_base::prelude::*;
 use gst_base::subclass::base_src::CreateSuccess;
 use gst_base::subclass::prelude::*;
@@ -413,8 +409,8 @@ impl BaseSrcImpl for NdiAudioSrc {
         let receiver = connect_ndi(
             self.cat,
             element,
-            settings.ndi_name.as_ref().map(String::as_str),
-            settings.url_address.as_ref().map(String::as_str),
+            settings.ndi_name.as_deref(),
+            settings.url_address.as_deref(),
             &settings.receiver_ndi_name,
             settings.connect_timeout,
             settings.bandwidth,
