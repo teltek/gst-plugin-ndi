@@ -3,6 +3,7 @@ use glib::subclass;
 use gst;
 use gst::prelude::*;
 use gst::subclass::prelude::*;
+use gst::{gst_debug, gst_element_error, gst_error, gst_error_msg};
 use gst_audio;
 use gst_base;
 use gst_base::prelude::*;
@@ -149,7 +150,7 @@ impl ObjectSubclass for NdiAudioSrc {
     type Instance = gst::subclass::ElementInstanceStruct<Self>;
     type Class = subclass::simple::ClassStruct<Self>;
 
-    glib_object_subclass!();
+    glib::glib_object_subclass!();
 
     fn new() -> Self {
         Self {
@@ -199,7 +200,7 @@ impl ObjectSubclass for NdiAudioSrc {
 }
 
 impl ObjectImpl for NdiAudioSrc {
-    glib_object_impl!();
+    glib::glib_object_impl!();
 
     fn constructed(&self, obj: &glib::Object) {
         self.parent_constructed(obj);

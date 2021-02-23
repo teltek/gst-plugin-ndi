@@ -2,6 +2,7 @@ use glib;
 use glib::prelude::*;
 use gst;
 use gst::prelude::*;
+use gst::{gst_debug, gst_element_error, gst_error, gst_log, gst_warning};
 use gst_video;
 use gst_video::prelude::*;
 

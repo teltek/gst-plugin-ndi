@@ -3,6 +3,7 @@ use glib::subclass;
 use gst;
 use gst::prelude::*;
 use gst::subclass::prelude::*;
+use gst::{gst_debug, gst_element_error, gst_error, gst_error_msg};
 use gst_base;
 use gst_base::prelude::*;
 use gst_base::subclass::base_src::CreateSuccess;
@@ -150,7 +151,7 @@ impl ObjectSubclass for NdiVideoSrc {
     type Instance = gst::subclass::ElementInstanceStruct<Self>;
     type Class = subclass::simple::ClassStruct<Self>;
 
-    glib_object_subclass!();
+    glib::glib_object_subclass!();
 
     fn new() -> Self {
         Self {
@@ -234,7 +235,7 @@ impl ObjectSubclass for NdiVideoSrc {
 }
 
 impl ObjectImpl for NdiVideoSrc {
-    glib_object_impl!();
+    glib::glib_object_impl!();
 
     fn constructed(&self, obj: &glib::Object) {
         self.parent_constructed(obj);

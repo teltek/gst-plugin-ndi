@@ -1,13 +1,4 @@
-#[macro_use]
-extern crate glib;
 use glib::prelude::*;
-#[macro_use]
-extern crate gstreamer as gst;
-extern crate gstreamer_audio as gst_audio;
-extern crate gstreamer_base as gst_base;
-extern crate gstreamer_video as gst_video;
-
-extern crate byte_slice_cast;
 
 mod device_provider;
 pub mod ndi;
@@ -35,7 +26,7 @@ pub enum TimestampMode {
 
 fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
     if !ndi::initialize() {
-        return Err(glib_bool_error!("Cannot initialize NDI"));
+        return Err(glib::glib_bool_error!("Cannot initialize NDI"));
     }
 
     ndivideosrc::register(plugin)?;
@@ -151,7 +142,7 @@ fn timestamp_mode_get_type() -> glib::Type {
     }
 }
 
-gst_plugin_define!(
+gst::gst_plugin_define!(
     ndi,
     env!("CARGO_PKG_DESCRIPTION"),
     plugin_init,

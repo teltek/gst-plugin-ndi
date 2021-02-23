@@ -3,6 +3,7 @@ use glib::subclass;
 use gst;
 use gst::prelude::*;
 use gst::subclass::prelude::*;
+use gst::{gst_error, gst_log, gst_trace};
 
 use once_cell::sync::OnceCell;
 
@@ -27,7 +28,7 @@ impl ObjectSubclass for DeviceProvider {
     type Instance = subclass::simple::InstanceStruct<Self>;
     type Class = subclass::simple::ClassStruct<Self>;
 
-    glib_object_subclass!();
+    glib::glib_object_subclass!();
 
     fn new() -> Self {
         Self {
@@ -54,7 +55,7 @@ impl ObjectSubclass for DeviceProvider {
 }
 
 impl ObjectImpl for DeviceProvider {
-    glib_object_impl!();
+    glib::glib_object_impl!();
 }
 
 impl DeviceProviderImpl for DeviceProvider {
@@ -213,7 +214,7 @@ impl ObjectSubclass for Device {
     type Instance = subclass::simple::InstanceStruct<Self>;
     type Class = subclass::simple::ClassStruct<Self>;
 
-    glib_object_subclass!();
+    glib::glib_object_subclass!();
 
     fn new() -> Self {
         Self {
@@ -228,7 +229,7 @@ impl ObjectSubclass for Device {
 }
 
 impl ObjectImpl for Device {
-    glib_object_impl!();
+    glib::glib_object_impl!();
 }
 
 impl DeviceImpl for Device {
