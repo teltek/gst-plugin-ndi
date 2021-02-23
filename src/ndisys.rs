@@ -63,18 +63,16 @@ extern "C" {
         p_total: *mut NDIlib_recv_queue_t,
     );
     pub fn NDIlib_send_create(
-        p_create_settings: *const NDIlib_send_create_t
+        p_create_settings: *const NDIlib_send_create_t,
     ) -> NDIlib_send_instance_t;
-    pub fn NDIlib_send_destroy(
-        p_instance: NDIlib_send_instance_t
-    );
+    pub fn NDIlib_send_destroy(p_instance: NDIlib_send_instance_t);
     pub fn NDIlib_send_send_video_v2(
         p_instance: NDIlib_send_instance_t,
-        p_video_data: *const NDIlib_video_frame_v2_t
+        p_video_data: *const NDIlib_video_frame_v2_t,
     );
     pub fn NDIlib_send_send_audio_v2(
         p_instance: NDIlib_send_instance_t,
-        p_audio_data: *const NDIlib_audio_frame_v2_t
+        p_audio_data: *const NDIlib_audio_frame_v2_t,
     );
 }
 

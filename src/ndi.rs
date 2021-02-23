@@ -5,6 +5,8 @@ use std::mem;
 use std::ptr;
 use std::sync::{Arc, Mutex};
 
+use byte_slice_cast::*;
+
 pub fn initialize() -> bool {
     unsafe { NDIlib_initialize() }
 }
@@ -339,11 +341,17 @@ impl RecvInstance {
             match res {
                 NDIlib_frame_type_e::NDIlib_frame_type_audio => {
                     assert!(audio);
-                    Ok(Some(Frame::Audio(AudioFrame::Borrowed(audio_frame, self))))
+                    Ok(Some(Frame::Audio(AudioFrame::BorrowedRecv(
+                        audio_frame,
+                        self,
+                    ))))
                 }
                 NDIlib_frame_type_e::NDIlib_frame_type_video => {
                     assert!(video);
-                    Ok(Some(Frame::Video(VideoFrame::Borrowed(video_frame, self))))
+                    Ok(Some(Frame::Video(VideoFrame::BorrowedRecv(
+                        video_frame,
+                        self,
+                    ))))
                 }
                 NDIlib_frame_type_e::NDIlib_frame_type_metadata => {
                     assert!(metadata);
@@ -362,6 +370,80 @@ impl RecvInstance {
 impl Drop for RecvInstanceInner {
     fn drop(&mut self) {
         unsafe { NDIlib_recv_destroy(self.0.as_ptr() as *mut _) }
+    }
+}
+
+#[derive(Debug)]
+pub struct SendBuilder<'a> {
+    ndi_name: &'a str,
+    clock_audio: bool,
+    clock_video: bool,
+}
+
+impl<'a> SendBuilder<'a> {
+    pub fn clock_audio(self) -> Self {
+        Self {
+            clock_audio: true,
+            ..self
+        }
+    }
+
+    pub fn clock_video(self) -> Self {
+        Self {
+            clock_video: true,
+            ..self
+        }
+    }
+
+    pub fn build(self) -> Option<SendInstance> {
+        unsafe {
+            let ndi_name = ffi::CString::new(self.ndi_name).unwrap();
+            let ptr = NDIlib_send_create(&NDIlib_send_create_t {
+                p_ndi_name: ndi_name.as_ptr(),
+                clock_video: self.clock_video,
+                clock_audio: self.clock_audio,
+                p_groups: ptr::null(),
+            });
+
+            if ptr.is_null() {
+                None
+            } else {
+                Some(SendInstance(ptr::NonNull::new_unchecked(ptr)))
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct SendInstance(ptr::NonNull<::std::os::raw::c_void>);
+
+unsafe impl Send for SendInstance {}
+
+impl SendInstance {
+    pub fn builder<'a>(ndi_name: &'a str) -> SendBuilder<'a> {
+        SendBuilder {
+            ndi_name,
+            clock_video: false,
+            clock_audio: false,
+        }
+    }
+
+    pub fn send_video(&mut self, frame: &VideoFrame) {
+        unsafe {
+            NDIlib_send_send_video_v2(self.0.as_ptr(), frame.as_ptr());
+        }
+    }
+
+    pub fn send_audio(&mut self, frame: &AudioFrame) {
+        unsafe {
+            NDIlib_send_send_audio_v2(self.0.as_ptr(), frame.as_ptr());
+        }
+    }
+}
+
+impl Drop for SendInstance {
+    fn drop(&mut self) {
+        unsafe { NDIlib_send_destroy(self.0.as_ptr() as *mut _) }
     }
 }
 
@@ -405,49 +487,67 @@ pub enum Frame<'a> {
 #[derive(Debug)]
 pub enum VideoFrame<'a> {
     //Owned(NDIlib_video_frame_v2_t, Option<ffi::CString>, Option<Vec<u8>>),
-    Borrowed(NDIlib_video_frame_v2_t, &'a RecvInstance),
+    BorrowedRecv(NDIlib_video_frame_v2_t, &'a RecvInstance),
+    BorrowedGst(
+        NDIlib_video_frame_v2_t,
+        &'a gst_video::VideoFrameRef<&'a gst::BufferRef>,
+    ),
 }
 
 impl<'a> VideoFrame<'a> {
     pub fn xres(&self) -> i32 {
         match self {
-            VideoFrame::Borrowed(ref frame, _) => frame.xres,
+            VideoFrame::BorrowedRecv(ref frame, _) | VideoFrame::BorrowedGst(ref frame, _) => {
+                frame.xres
+            }
         }
     }
 
     pub fn yres(&self) -> i32 {
         match self {
-            VideoFrame::Borrowed(ref frame, _) => frame.yres,
+            VideoFrame::BorrowedRecv(ref frame, _) | VideoFrame::BorrowedGst(ref frame, _) => {
+                frame.yres
+            }
         }
     }
 
     pub fn fourcc(&self) -> NDIlib_FourCC_video_type_e {
         match self {
-            VideoFrame::Borrowed(ref frame, _) => frame.FourCC,
+            VideoFrame::BorrowedRecv(ref frame, _) | VideoFrame::BorrowedGst(ref frame, _) => {
+                frame.FourCC
+            }
         }
     }
 
     pub fn frame_rate(&self) -> (i32, i32) {
         match self {
-            VideoFrame::Borrowed(ref frame, _) => (frame.frame_rate_N, frame.frame_rate_D),
+            VideoFrame::BorrowedRecv(ref frame, _) | VideoFrame::BorrowedGst(ref frame, _) => {
+                (frame.frame_rate_N, frame.frame_rate_D)
+            }
         }
     }
 
     pub fn picture_aspect_ratio(&self) -> f32 {
         match self {
-            VideoFrame::Borrowed(ref frame, _) => frame.picture_aspect_ratio,
+            VideoFrame::BorrowedRecv(ref frame, _) | VideoFrame::BorrowedGst(ref frame, _) => {
+                frame.picture_aspect_ratio
+            }
         }
     }
 
     pub fn frame_format_type(&self) -> NDIlib_frame_format_type_e {
         match self {
-            VideoFrame::Borrowed(ref frame, _) => frame.frame_format_type,
+            VideoFrame::BorrowedRecv(ref frame, _) | VideoFrame::BorrowedGst(ref frame, _) => {
+                frame.frame_format_type
+            }
         }
     }
 
     pub fn timecode(&self) -> i64 {
         match self {
-            VideoFrame::Borrowed(ref frame, _) => frame.timecode,
+            VideoFrame::BorrowedRecv(ref frame, _) | VideoFrame::BorrowedGst(ref frame, _) => {
+                frame.timecode
+            }
         }
     }
 
@@ -467,7 +567,7 @@ impl<'a> VideoFrame<'a> {
         unsafe {
             use std::slice;
             match self {
-                VideoFrame::Borrowed(ref frame, _) => {
+                VideoFrame::BorrowedRecv(ref frame, _) | VideoFrame::BorrowedGst(ref frame, _) => {
                     slice::from_raw_parts(frame.p_data as *const u8, frame_size as usize)
                 }
             }
@@ -476,7 +576,7 @@ impl<'a> VideoFrame<'a> {
 
     pub fn line_stride_or_data_size_in_bytes(&self) -> i32 {
         match self {
-            VideoFrame::Borrowed(ref frame, _) => {
+            VideoFrame::BorrowedRecv(ref frame, _) | VideoFrame::BorrowedGst(ref frame, _) => {
                 let stride = frame.line_stride_or_data_size_in_bytes;
 
                 if stride != 0 {
@@ -506,7 +606,7 @@ impl<'a> VideoFrame<'a> {
     pub fn metadata(&self) -> Option<&str> {
         unsafe {
             match self {
-                VideoFrame::Borrowed(ref frame, _) => {
+                VideoFrame::BorrowedRecv(ref frame, _) | VideoFrame::BorrowedGst(ref frame, _) => {
                     if frame.p_metadata.is_null() {
                         None
                     } else {
@@ -519,21 +619,137 @@ impl<'a> VideoFrame<'a> {
 
     pub fn timestamp(&self) -> i64 {
         match self {
-            VideoFrame::Borrowed(ref frame, _) => frame.timestamp,
+            VideoFrame::BorrowedRecv(ref frame, _) | VideoFrame::BorrowedGst(ref frame, _) => {
+                frame.timestamp
+            }
         }
     }
 
     pub fn as_ptr(&self) -> *const NDIlib_video_frame_v2_t {
         match self {
-            VideoFrame::Borrowed(ref frame, _) => frame,
+            VideoFrame::BorrowedRecv(ref frame, _) | VideoFrame::BorrowedGst(ref frame, _) => frame,
         }
+    }
+
+    pub fn try_from_video_frame(
+        frame: &'a gst_video::VideoFrameRef<&'a gst::BufferRef>,
+        timecode: i64,
+    ) -> Result<Self, ()> {
+        // Planar formats must be in contiguous memory
+        let format = match frame.format() {
+            gst_video::VideoFormat::Uyvy => ndisys::NDIlib_FourCC_video_type_UYVY,
+            gst_video::VideoFormat::I420 => {
+                if (frame.plane_data(1).unwrap().as_ptr() as usize)
+                    .checked_sub(frame.plane_data(0).unwrap().as_ptr() as usize)
+                    != Some(frame.height() as usize * frame.plane_stride()[0] as usize)
+                {
+                    return Err(());
+                }
+
+                if (frame.plane_data(2).unwrap().as_ptr() as usize)
+                    .checked_sub(frame.plane_data(1).unwrap().as_ptr() as usize)
+                    != Some((frame.height() as usize + 1) / 2 * frame.plane_stride()[1] as usize)
+                {
+                    return Err(());
+                }
+
+                ndisys::NDIlib_FourCC_video_type_I420
+            }
+            gst_video::VideoFormat::Nv12 => {
+                if (frame.plane_data(1).unwrap().as_ptr() as usize)
+                    .checked_sub(frame.plane_data(0).unwrap().as_ptr() as usize)
+                    != Some(frame.height() as usize * frame.plane_stride()[0] as usize)
+                {
+                    return Err(());
+                }
+
+                ndisys::NDIlib_FourCC_video_type_NV12
+            }
+            gst_video::VideoFormat::Nv21 => {
+                if (frame.plane_data(1).unwrap().as_ptr() as usize)
+                    .checked_sub(frame.plane_data(0).unwrap().as_ptr() as usize)
+                    != Some(frame.height() as usize * frame.plane_stride()[0] as usize)
+                {
+                    return Err(());
+                }
+
+                ndisys::NDIlib_FourCC_video_type_NV12
+            }
+            gst_video::VideoFormat::Yv12 => {
+                if (frame.plane_data(1).unwrap().as_ptr() as usize)
+                    .checked_sub(frame.plane_data(0).unwrap().as_ptr() as usize)
+                    != Some(frame.height() as usize * frame.plane_stride()[0] as usize)
+                {
+                    return Err(());
+                }
+
+                if (frame.plane_data(2).unwrap().as_ptr() as usize)
+                    .checked_sub(frame.plane_data(1).unwrap().as_ptr() as usize)
+                    != Some((frame.height() as usize + 1) / 2 * frame.plane_stride()[1] as usize)
+                {
+                    return Err(());
+                }
+
+                ndisys::NDIlib_FourCC_video_type_YV12
+            }
+            gst_video::VideoFormat::Bgra => ndisys::NDIlib_FourCC_video_type_BGRA,
+            gst_video::VideoFormat::Bgrx => ndisys::NDIlib_FourCC_video_type_BGRX,
+            gst_video::VideoFormat::Rgba => ndisys::NDIlib_FourCC_video_type_RGBA,
+            gst_video::VideoFormat::Rgbx => ndisys::NDIlib_FourCC_video_type_RGBX,
+            _ => return Err(()),
+        };
+
+        let frame_format_type = match frame.info().interlace_mode() {
+            gst_video::VideoInterlaceMode::Progressive => {
+                NDIlib_frame_format_type_e::NDIlib_frame_format_type_progressive
+            }
+            gst_video::VideoInterlaceMode::Interleaved => {
+                NDIlib_frame_format_type_e::NDIlib_frame_format_type_interleaved
+            }
+            // FIXME: Is this correct?
+            #[cfg(feature = "interlaced-fields")]
+            gst_video::VideoInterlaceMode::Alternate
+                if frame.flags().contains(gst_video::VideoFrameFlags::TFF) =>
+            {
+                NDIlib_frame_format_type_e::NDIlib_frame_format_type_field_0
+            }
+            #[cfg(feature = "interlaced-fields")]
+            gst_video::VideoInterlaceMode::Alternate
+                if !frame.flags().contains(gst_video::VideoFrameFlags::TFF) =>
+            {
+                NDIlib_frame_format_type_e::NDIlib_frame_format_type_field_1
+            }
+            _ => return Err(()),
+        };
+
+        let picture_aspect_ratio =
+            frame.info().par() * gst::Fraction::new(frame.width() as i32, frame.height() as i32);
+        let picture_aspect_ratio =
+            *picture_aspect_ratio.numer() as f32 / *picture_aspect_ratio.denom() as f32;
+
+        let ndi_frame = NDIlib_video_frame_v2_t {
+            xres: frame.width() as i32,
+            yres: frame.height() as i32,
+            FourCC: format,
+            frame_rate_N: *frame.info().fps().numer(),
+            frame_rate_D: *frame.info().fps().denom(),
+            picture_aspect_ratio,
+            frame_format_type,
+            timecode,
+            p_data: frame.plane_data(0).unwrap().as_ptr() as *const i8,
+            line_stride_or_data_size_in_bytes: frame.plane_stride()[0],
+            p_metadata: ptr::null(),
+            timestamp: 0,
+        };
+
+        Ok(VideoFrame::BorrowedGst(ndi_frame, frame))
     }
 }
 
 impl<'a> Drop for VideoFrame<'a> {
     #[allow(irrefutable_let_patterns)]
     fn drop(&mut self) {
-        if let VideoFrame::Borrowed(ref mut frame, ref recv) = *self {
+        if let VideoFrame::BorrowedRecv(ref mut frame, ref recv) = *self {
             unsafe {
                 NDIlib_recv_free_video_v2(((recv.0).0).0.as_ptr() as *mut _, frame);
             }
@@ -543,32 +759,44 @@ impl<'a> Drop for VideoFrame<'a> {
 
 #[derive(Debug)]
 pub enum AudioFrame<'a> {
-    //Owned(NDIlib_audio_frame_v2_t, Option<ffi::CString>, Option<Vec<u8>>),
-    Borrowed(NDIlib_audio_frame_v2_t, &'a RecvInstance),
+    Owned(
+        NDIlib_audio_frame_v2_t,
+        Option<ffi::CString>,
+        Option<Vec<f32>>,
+    ),
+    BorrowedRecv(NDIlib_audio_frame_v2_t, &'a RecvInstance),
 }
 
 impl<'a> AudioFrame<'a> {
     pub fn sample_rate(&self) -> i32 {
         match self {
-            AudioFrame::Borrowed(ref frame, _) => frame.sample_rate,
+            AudioFrame::BorrowedRecv(ref frame, _) | AudioFrame::Owned(ref frame, _, _) => {
+                frame.sample_rate
+            }
         }
     }
 
     pub fn no_channels(&self) -> i32 {
         match self {
-            AudioFrame::Borrowed(ref frame, _) => frame.no_channels,
+            AudioFrame::BorrowedRecv(ref frame, _) | AudioFrame::Owned(ref frame, _, _) => {
+                frame.no_channels
+            }
         }
     }
 
     pub fn no_samples(&self) -> i32 {
         match self {
-            AudioFrame::Borrowed(ref frame, _) => frame.no_samples,
+            AudioFrame::BorrowedRecv(ref frame, _) | AudioFrame::Owned(ref frame, _, _) => {
+                frame.no_samples
+            }
         }
     }
 
     pub fn timecode(&self) -> i64 {
         match self {
-            AudioFrame::Borrowed(ref frame, _) => frame.timecode,
+            AudioFrame::BorrowedRecv(ref frame, _) | AudioFrame::Owned(ref frame, _, _) => {
+                frame.timecode
+            }
         }
     }
 
@@ -576,24 +804,28 @@ impl<'a> AudioFrame<'a> {
         unsafe {
             use std::slice;
             match self {
-                AudioFrame::Borrowed(ref frame, _) => slice::from_raw_parts(
-                    frame.p_data as *const u8,
-                    (frame.no_samples * frame.channel_stride_in_bytes) as usize,
-                ),
+                AudioFrame::BorrowedRecv(ref frame, _) | AudioFrame::Owned(ref frame, _, _) => {
+                    slice::from_raw_parts(
+                        frame.p_data as *const u8,
+                        (frame.no_samples * frame.channel_stride_in_bytes) as usize,
+                    )
+                }
             }
         }
     }
 
     pub fn channel_stride_in_bytes(&self) -> i32 {
         match self {
-            AudioFrame::Borrowed(ref frame, _) => frame.channel_stride_in_bytes,
+            AudioFrame::BorrowedRecv(ref frame, _) | AudioFrame::Owned(ref frame, _, _) => {
+                frame.channel_stride_in_bytes
+            }
         }
     }
 
     pub fn metadata(&self) -> Option<&str> {
         unsafe {
             match self {
-                AudioFrame::Borrowed(ref frame, _) => {
+                AudioFrame::BorrowedRecv(ref frame, _) | AudioFrame::Owned(ref frame, _, _) => {
                     if frame.p_metadata.is_null() {
                         None
                     } else {
@@ -606,13 +838,15 @@ impl<'a> AudioFrame<'a> {
 
     pub fn timestamp(&self) -> i64 {
         match self {
-            AudioFrame::Borrowed(ref frame, _) => frame.timestamp,
+            AudioFrame::BorrowedRecv(ref frame, _) | AudioFrame::Owned(ref frame, _, _) => {
+                frame.timestamp
+            }
         }
     }
 
     pub fn as_ptr(&self) -> *const NDIlib_audio_frame_v2_t {
         match self {
-            AudioFrame::Borrowed(ref frame, _) => frame,
+            AudioFrame::BorrowedRecv(ref frame, _) | AudioFrame::Owned(ref frame, _, _) => frame,
         }
     }
 
@@ -635,12 +869,56 @@ impl<'a> AudioFrame<'a> {
             NDIlib_util_audio_to_interleaved_16s_v2(self.as_ptr(), &mut dst);
         }
     }
+
+    pub fn try_from_interleaved_16s(
+        info: &gst_audio::AudioInfo,
+        buffer: &gst::BufferRef,
+        timecode: i64,
+    ) -> Result<Self, ()> {
+        if info.format() != gst_audio::AUDIO_FORMAT_S16 {
+            return Err(());
+        }
+
+        let map = buffer.map_readable().map_err(|_| ())?;
+        let src_data = map.as_slice_of::<i16>().map_err(|_| ())?;
+
+        let src = NDIlib_audio_frame_interleaved_16s_t {
+            sample_rate: info.rate() as i32,
+            no_channels: info.channels() as i32,
+            no_samples: src_data.len() as i32 / info.channels() as i32,
+            timecode,
+            reference_level: 0,
+            p_data: src_data.as_ptr() as *mut i16,
+        };
+
+        let channel_stride_in_bytes = src.no_samples * mem::size_of::<f32>() as i32;
+        let mut dest_data =
+            Vec::with_capacity(channel_stride_in_bytes as usize * info.channels() as usize);
+
+        let mut dest = NDIlib_audio_frame_v2_t {
+            sample_rate: src.sample_rate,
+            no_channels: src.no_channels,
+            no_samples: src.no_samples,
+            timecode: src.timecode,
+            p_data: dest_data.as_mut_ptr(),
+            channel_stride_in_bytes,
+            p_metadata: ptr::null(),
+            timestamp: 0,
+        };
+
+        unsafe {
+            NDIlib_util_audio_from_interleaved_16s_v2(&src, &mut dest);
+            dest_data.set_len(dest_data.capacity());
+        }
+
+        Ok(AudioFrame::Owned(dest, None, Some(dest_data)))
+    }
 }
 
 impl<'a> Drop for AudioFrame<'a> {
     #[allow(irrefutable_let_patterns)]
     fn drop(&mut self) {
-        if let AudioFrame::Borrowed(ref mut frame, ref recv) = *self {
+        if let AudioFrame::BorrowedRecv(ref mut frame, ref recv) = *self {
             unsafe {
                 NDIlib_recv_free_audio_v2(((recv.0).0).0.as_ptr() as *mut _, frame);
             }
