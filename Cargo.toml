@@ -9,7 +9,6 @@ edition = "2018"
 
 [dependencies]
 glib = "0.10"
-gobject-sys = "0.10"
 gst = { package = "gstreamer", version = "0.16", features = ["v1_12"] }
 gst-base = { package = "gstreamer-base", version = "0.16" }
 gst-audio = { package = "gstreamer-audio", version = "0.16" }
