@@ -7,8 +7,6 @@ extern crate gstreamer_audio as gst_audio;
 extern crate gstreamer_base as gst_base;
 extern crate gstreamer_video as gst_video;
 
-#[macro_use]
-extern crate lazy_static;
 extern crate byte_slice_cast;
 
 mod device_provider;
@@ -24,6 +22,8 @@ use crate::receiver::*;
 
 use std::collections::HashMap;
 use std::time;
+
+use once_cell::sync::Lazy;
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy)]
 #[repr(u32)]
@@ -44,21 +44,20 @@ fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
     Ok(())
 }
 
-lazy_static! {
-    static ref DEFAULT_RECEIVER_NDI_NAME: String = {
-        format!(
-            "GStreamer NDI Source {}-{}",
-            env!("CARGO_PKG_VERSION"),
-            env!("COMMIT_ID")
-        )
-    };
-}
+static DEFAULT_RECEIVER_NDI_NAME: Lazy<String> = Lazy::new(|| {
+    format!(
+        "GStreamer NDI Source {}-{}",
+        env!("CARGO_PKG_VERSION"),
+        env!("COMMIT_ID")
+    )
+});
 
 #[cfg(feature = "reference-timestamps")]
-lazy_static! {
-    static ref TIMECODE_CAPS: gst::Caps = gst::Caps::new_simple("timestamp/x-ndi-timecode", &[]);
-    static ref TIMESTAMP_CAPS: gst::Caps = gst::Caps::new_simple("timestamp/x-ndi-timestamp", &[]);
-}
+static TIMECODE_CAPS: Lazy<gst::Caps> =
+    Lazy::new(|| gst::Caps::new_simple("timestamp/x-ndi-timecode", &[]));
+#[cfg(feature = "reference-timestamps")]
+static TIMESTAMP_CAPS: Lazy<gst::Caps> =
+    Lazy::new(|| gst::Caps::new_simple("timestamp/x-ndi-timestamp", &[]));
 
 impl glib::translate::ToGlib for TimestampMode {
     type GlibType = i32;

@@ -13,6 +13,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::thread;
 
+use once_cell::sync::Lazy;
+
 use super::*;
 
 pub struct ReceiverInfo {
@@ -25,12 +27,10 @@ pub struct ReceiverInfo {
     observations: Observations,
 }
 
-lazy_static! {
-    static ref HASHMAP_RECEIVERS: Mutex<HashMap<usize, ReceiverInfo>> = {
-        let m = HashMap::new();
-        Mutex::new(m)
-    };
-}
+static HASHMAP_RECEIVERS: Lazy<Mutex<HashMap<usize, ReceiverInfo>>> = Lazy::new(|| {
+    let m = HashMap::new();
+    Mutex::new(m)
+});
 
 static ID_RECEIVER: AtomicUsize = AtomicUsize::new(0);
 

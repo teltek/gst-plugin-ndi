@@ -14,8 +14,7 @@ gstreamer = { version = "0.16", features = ["v1_12"] }
 gstreamer-base = "0.16"
 gstreamer-audio = "0.16"
 gstreamer-video = { version = "0.16", features = ["v1_12"] }
-lazy_static = "1.1.0"
-byte-slice-cast = "0.3.0"
+byte-slice-cast = "1"
 once_cell = "1.0"
 
 [build-dependencies]
