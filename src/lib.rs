@@ -20,12 +20,14 @@ use once_cell::sync::Lazy;
 #[repr(u32)]
 #[genum(type_name = "GstNdiTimestampMode")]
 pub enum TimestampMode {
-    #[genum(name = "Receive Time", nick = "receive-time")]
-    ReceiveTime = 0,
+    #[genum(name = "Receive Time / Timecode", nick = "receive-time-vs-timecode")]
+    ReceiveTimeTimecode = 0,
+    #[genum(name = "Receive Time / Timestamp", nick = "receive-time-vs-timestamp")]
+    ReceiveTimeTimestamp = 1,
     #[genum(name = "NDI Timecode", nick = "timecode")]
-    Timecode = 1,
+    Timecode = 2,
     #[genum(name = "NDI Timestamp", nick = "timestamp")]
-    Timestamp = 2,
+    Timestamp = 3,
 }
 
 fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {

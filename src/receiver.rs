@@ -812,7 +812,12 @@ impl<T: ReceiverType> Receiver<T> {
         );
 
         let (pts, duration) = match self.0.timestamp_mode {
-            TimestampMode::ReceiveTime => self.0.observations.process(
+            TimestampMode::ReceiveTimeTimecode => {
+                self.0
+                    .observations
+                    .process(self.0.cat, element, (timecode, receive_time), duration)
+            }
+            TimestampMode::ReceiveTimeTimestamp => self.0.observations.process(
                 self.0.cat,
                 element,
                 (timestamp, receive_time),
