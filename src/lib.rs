@@ -3,6 +3,12 @@ use glib::prelude::*;
 mod device_provider;
 pub mod ndi;
 mod ndiaudiosrc;
+#[cfg(feature = "sink")]
+mod ndisink;
+#[cfg(feature = "sink")]
+mod ndisinkcombiner;
+#[cfg(feature = "sink")]
+pub mod ndisinkmeta;
 pub mod ndisys;
 mod ndivideosrc;
 pub mod receiver;
@@ -35,9 +41,15 @@ fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
         return Err(glib::glib_bool_error!("Cannot initialize NDI"));
     }
 
+    device_provider::register(plugin)?;
+
     ndivideosrc::register(plugin)?;
     ndiaudiosrc::register(plugin)?;
-    device_provider::register(plugin)?;
+    #[cfg(feature = "sink")]
+    {
+        ndisinkcombiner::register(plugin)?;
+        ndisink::register(plugin)?;
+    }
     Ok(())
 }
 

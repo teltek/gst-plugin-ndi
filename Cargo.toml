@@ -20,9 +20,10 @@ once_cell = "1.0"
 gst-plugin-version-helper = "0.2"
 
 [features]
-default = ["interlaced-fields", "reference-timestamps"]
+default = ["interlaced-fields", "reference-timestamps", "sink"]
 interlaced-fields = ["gst/v1_16", "gst-video/v1_16"]
 reference-timestamps = ["gst/v1_14"]
+sink = ["gst/v1_18", "gst-base/v1_18"]
 
 [lib]
 name = "gstndi"
