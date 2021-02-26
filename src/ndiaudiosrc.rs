@@ -1,10 +1,7 @@
-use glib;
 use glib::subclass;
-use gst;
 use gst::prelude::*;
 use gst::subclass::prelude::*;
-use gst_audio;
-use gst_base;
+use gst::{gst_debug, gst_element_error, gst_error, gst_error_msg};
 use gst_base::prelude::*;
 use gst_base::subclass::base_src::CreateSuccess;
 use gst_base::subclass::prelude::*;
@@ -149,7 +146,7 @@ impl ObjectSubclass for NdiAudioSrc {
     type Instance = gst::subclass::ElementInstanceStruct<Self>;
     type Class = subclass::simple::ClassStruct<Self>;
 
-    glib_object_subclass!();
+    glib::glib_object_subclass!();
 
     fn new() -> Self {
         Self {
@@ -199,7 +196,7 @@ impl ObjectSubclass for NdiAudioSrc {
 }
 
 impl ObjectImpl for NdiAudioSrc {
-    glib_object_impl!();
+    glib::glib_object_impl!();
 
     fn constructed(&self, obj: &glib::Object) {
         self.parent_constructed(obj);
@@ -412,8 +409,8 @@ impl BaseSrcImpl for NdiAudioSrc {
         let receiver = connect_ndi(
             self.cat,
             element,
-            settings.ndi_name.as_ref().map(String::as_str),
-            settings.url_address.as_ref().map(String::as_str),
+            settings.ndi_name.as_deref(),
+            settings.url_address.as_deref(),
             &settings.receiver_ndi_name,
             settings.connect_timeout,
             settings.bandwidth,

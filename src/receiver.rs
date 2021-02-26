@@ -1,8 +1,6 @@
-use glib;
 use glib::prelude::*;
-use gst;
 use gst::prelude::*;
-use gst_video;
+use gst::{gst_debug, gst_element_error, gst_error, gst_log, gst_warning};
 use gst_video::prelude::*;
 
 use byte_slice_cast::AsMutSliceOf;
@@ -12,6 +10,8 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::thread;
+
+use once_cell::sync::Lazy;
 
 use super::*;
 
@@ -25,12 +25,10 @@ pub struct ReceiverInfo {
     observations: Observations,
 }
 
-lazy_static! {
-    static ref HASHMAP_RECEIVERS: Mutex<HashMap<usize, ReceiverInfo>> = {
-        let m = HashMap::new();
-        Mutex::new(m)
-    };
-}
+static HASHMAP_RECEIVERS: Lazy<Mutex<HashMap<usize, ReceiverInfo>>> = Lazy::new(|| {
+    let m = HashMap::new();
+    Mutex::new(m)
+});
 
 static ID_RECEIVER: AtomicUsize = AtomicUsize::new(0);
 
@@ -544,14 +542,14 @@ where
         // then that one has to match and the other one does not matter
         if (ndi_name.is_some()
             && url_address.is_some()
-            && receiver.ndi_name.as_ref().map(String::as_str) == ndi_name
-            && receiver.url_address.as_ref().map(String::as_str) == url_address)
+            && receiver.ndi_name.as_deref() == ndi_name
+            && receiver.url_address.as_deref() == url_address)
             || (ndi_name.is_some()
                 && url_address.is_none()
-                && receiver.ndi_name.as_ref().map(String::as_str) == ndi_name)
+                && receiver.ndi_name.as_deref() == ndi_name)
             || (ndi_name.is_none()
                 && url_address.is_some()
-                && receiver.url_address.as_ref().map(String::as_str) == url_address)
+                && receiver.url_address.as_deref() == url_address)
         {
             if (receiver.video.is_some() || !T::IS_VIDEO)
                 && (receiver.audio.is_some() || T::IS_VIDEO)
@@ -950,7 +948,7 @@ impl Receiver<VideoReceiver> {
 
         let info = self.create_video_info(element, &video_frame)?;
 
-        let buffer = self.create_video_buffer(element, pts, duration, &info, &video_frame)?;
+        let buffer = self.create_video_buffer(element, pts, duration, &info, &video_frame);
 
         gst_log!(self.0.cat, obj: element, "Produced buffer {:?}", buffer);
 
@@ -1103,7 +1101,7 @@ impl Receiver<VideoReceiver> {
         duration: gst::ClockTime,
         info: &gst_video::VideoInfo,
         video_frame: &VideoFrame,
-    ) -> Result<gst::Buffer, gst::FlowError> {
+    ) -> gst::Buffer {
         let mut buffer = gst::Buffer::with_size(info.size()).unwrap();
         {
             let buffer = buffer.get_mut().unwrap();
@@ -1174,7 +1172,7 @@ impl Receiver<VideoReceiver> {
         info: &gst_video::VideoInfo,
         buffer: gst::Buffer,
         video_frame: &VideoFrame,
-    ) -> Result<gst::Buffer, gst::FlowError> {
+    ) -> gst::Buffer {
         let mut vframe = gst_video::VideoFrame::from_buffer_writable(buffer, info).unwrap();
 
         match info.format() {
@@ -1289,7 +1287,7 @@ impl Receiver<VideoReceiver> {
             _ => unreachable!(),
         }
 
-        Ok(vframe.into_buffer())
+        vframe.into_buffer()
     }
 }
 
@@ -1378,7 +1376,7 @@ impl Receiver<AudioReceiver> {
 
         let info = self.create_audio_info(element, &audio_frame)?;
 
-        let buffer = self.create_audio_buffer(element, pts, duration, &info, &audio_frame)?;
+        let buffer = self.create_audio_buffer(element, pts, duration, &info, &audio_frame);
 
         gst_log!(self.0.cat, obj: element, "Produced buffer {:?}", buffer);
 
@@ -1434,7 +1432,7 @@ impl Receiver<AudioReceiver> {
         duration: gst::ClockTime,
         info: &gst_audio::AudioInfo,
         audio_frame: &AudioFrame,
-    ) -> Result<gst::Buffer, gst::FlowError> {
+    ) -> gst::Buffer {
         // We multiply by 2 because is the size in bytes of an i16 variable
         let buff_size = (audio_frame.no_samples() as u32 * info.bpf()) as usize;
         let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
@@ -1471,6 +1469,6 @@ impl Receiver<AudioReceiver> {
             );
         }
 
-        Ok(buffer)
+        buffer
     }
 }
