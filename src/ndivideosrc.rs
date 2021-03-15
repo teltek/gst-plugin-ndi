@@ -40,7 +40,7 @@ impl Default for Settings {
             connect_timeout: 10000,
             timeout: 5000,
             bandwidth: ndisys::NDIlib_recv_bandwidth_highest,
-            timestamp_mode: TimestampMode::ReceiveTime,
+            timestamp_mode: TimestampMode::ReceiveTimeTimecode,
         }
     }
 }
@@ -112,7 +112,7 @@ static PROPERTIES: [subclass::Property; 7] = [
             "Timestamp Mode",
             "Timestamp information to use for outgoing PTS",
             TimestampMode::static_type(),
-            TimestampMode::ReceiveTime as i32,
+            TimestampMode::ReceiveTimeTimecode as i32,
             glib::ParamFlags::READWRITE,
         )
     }),

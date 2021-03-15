@@ -3,6 +3,12 @@ use glib::prelude::*;
 mod device_provider;
 pub mod ndi;
 mod ndiaudiosrc;
+#[cfg(feature = "sink")]
+mod ndisink;
+#[cfg(feature = "sink")]
+mod ndisinkcombiner;
+#[cfg(feature = "sink")]
+pub mod ndisinkmeta;
 pub mod ndisys;
 mod ndivideosrc;
 pub mod receiver;
@@ -20,12 +26,14 @@ use once_cell::sync::Lazy;
 #[repr(u32)]
 #[genum(type_name = "GstNdiTimestampMode")]
 pub enum TimestampMode {
-    #[genum(name = "Receive Time", nick = "receive-time")]
-    ReceiveTime = 0,
+    #[genum(name = "Receive Time / Timecode", nick = "receive-time-vs-timecode")]
+    ReceiveTimeTimecode = 0,
+    #[genum(name = "Receive Time / Timestamp", nick = "receive-time-vs-timestamp")]
+    ReceiveTimeTimestamp = 1,
     #[genum(name = "NDI Timecode", nick = "timecode")]
-    Timecode = 1,
+    Timecode = 2,
     #[genum(name = "NDI Timestamp", nick = "timestamp")]
-    Timestamp = 2,
+    Timestamp = 3,
 }
 
 fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
@@ -33,9 +41,15 @@ fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
         return Err(glib::glib_bool_error!("Cannot initialize NDI"));
     }
 
+    device_provider::register(plugin)?;
+
     ndivideosrc::register(plugin)?;
     ndiaudiosrc::register(plugin)?;
-    device_provider::register(plugin)?;
+    #[cfg(feature = "sink")]
+    {
+        ndisinkcombiner::register(plugin)?;
+        ndisink::register(plugin)?;
+    }
     Ok(())
 }
 

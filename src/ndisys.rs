@@ -62,6 +62,18 @@ extern "C" {
         p_instance: NDIlib_recv_instance_t,
         p_total: *mut NDIlib_recv_queue_t,
     );
+    pub fn NDIlib_send_create(
+        p_create_settings: *const NDIlib_send_create_t,
+    ) -> NDIlib_send_instance_t;
+    pub fn NDIlib_send_destroy(p_instance: NDIlib_send_instance_t);
+    pub fn NDIlib_send_send_video_v2(
+        p_instance: NDIlib_send_instance_t,
+        p_video_data: *const NDIlib_video_frame_v2_t,
+    );
+    pub fn NDIlib_send_send_audio_v2(
+        p_instance: NDIlib_send_instance_t,
+        p_audio_data: *const NDIlib_audio_frame_v2_t,
+    );
 }
 
 pub type NDIlib_find_instance_t = *mut ::std::os::raw::c_void;
@@ -146,6 +158,17 @@ pub struct NDIlib_recv_create_v3_t {
 }
 
 pub type NDIlib_recv_instance_t = *mut ::std::os::raw::c_void;
+
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct NDIlib_send_create_t {
+    pub p_ndi_name: *const ::std::os::raw::c_char,
+    pub p_groups: *const ::std::os::raw::c_char,
+    pub clock_video: bool,
+    pub clock_audio: bool,
+}
+
+pub type NDIlib_send_instance_t = *mut ::std::os::raw::c_void;
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
