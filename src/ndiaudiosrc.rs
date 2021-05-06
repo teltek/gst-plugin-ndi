@@ -365,6 +365,10 @@ impl ElementImpl for NdiAudioSrc {
                     controller.shutdown();
                 }
             }
+            gst::StateChange::ReadyToNull => {
+                let mut state = self.state.lock().unwrap();
+                state.receiver = None;
+            }
             _ => (),
         }
 
