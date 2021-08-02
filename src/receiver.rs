@@ -70,6 +70,7 @@ pub struct ReceiverInner<T: ReceiverType> {
     id: usize,
 
     queue: ReceiverQueue<T>,
+    max_queue_length: usize,
 
     recv: Mutex<RecvInstance>,
 
@@ -378,6 +379,7 @@ impl<T: ReceiverType> Receiver<T> {
         timestamp_mode: TimestampMode,
         timeout: u32,
         connect_timeout: u32,
+        max_queue_length: usize,
         element: &gst_base::BaseSrc,
         cat: gst::DebugCategory,
     ) -> Self
@@ -391,12 +393,13 @@ impl<T: ReceiverType> Receiver<T> {
                     capturing: true,
                     playing: false,
                     flushing: false,
-                    buffer_queue: VecDeque::with_capacity(5),
+                    buffer_queue: VecDeque::with_capacity(max_queue_length),
                     error: None,
                     timeout: false,
                 }),
                 Condvar::new(),
             ))),
+            max_queue_length,
             recv: Mutex::new(info.recv.clone()),
             observations: info.observations.clone(),
             cat,
@@ -526,6 +529,7 @@ pub fn connect_ndi<T: ReceiverType>(
     bandwidth: NDIlib_recv_bandwidth_e,
     timestamp_mode: TimestampMode,
     timeout: u32,
+    max_queue_length: usize,
 ) -> Option<Receiver<T>>
 where
     Receiver<T>: ReceiverCapture<T>,
@@ -572,6 +576,7 @@ where
                     timestamp_mode,
                     timeout,
                     connect_timeout,
+                    max_queue_length,
                     element,
                     cat,
                 ));
@@ -629,6 +634,7 @@ where
         timestamp_mode,
         timeout,
         connect_timeout,
+        max_queue_length,
         element,
         cat,
     );
@@ -711,7 +717,7 @@ where
         match res {
             Ok(item) => {
                 let mut queue = (receiver.0.queue.0).0.lock().unwrap();
-                while queue.buffer_queue.len() > 5 {
+                while queue.buffer_queue.len() > receiver.0.max_queue_length {
                     gst_warning!(
                         receiver.0.cat,
                         obj: &element,
