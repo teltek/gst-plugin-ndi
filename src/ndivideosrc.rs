@@ -26,6 +26,7 @@ struct Settings {
     url_address: Option<String>,
     connect_timeout: u32,
     timeout: u32,
+    max_queue_length: u32,
     receiver_ndi_name: String,
     bandwidth: ndisys::NDIlib_recv_bandwidth_e,
     timestamp_mode: TimestampMode,
@@ -39,13 +40,14 @@ impl Default for Settings {
             receiver_ndi_name: DEFAULT_RECEIVER_NDI_NAME.clone(),
             connect_timeout: 10000,
             timeout: 5000,
+            max_queue_length: 5,
             bandwidth: ndisys::NDIlib_recv_bandwidth_highest,
             timestamp_mode: TimestampMode::ReceiveTimeTimecode,
         }
     }
 }
 
-static PROPERTIES: [subclass::Property; 7] = [
+static PROPERTIES: [subclass::Property; 8] = [
     subclass::Property("ndi-name", |name| {
         glib::ParamSpec::string(
             name,
@@ -92,6 +94,17 @@ static PROPERTIES: [subclass::Property; 7] = [
             0,
             u32::MAX,
             5000,
+            glib::ParamFlags::READWRITE,
+        )
+    }),
+    subclass::Property("max-queue-length", |name| {
+        glib::ParamSpec::uint(
+            name,
+            "Max Queue Length",
+            "Maximum receive queue length",
+            0,
+            u32::MAX,
+            5,
             glib::ParamFlags::READWRITE,
         )
     }),
@@ -309,6 +322,18 @@ impl ObjectImpl for NdiVideoSrc {
                 );
                 settings.timeout = timeout;
             }
+            subclass::Property("max-queue-length", ..) => {
+                let mut settings = self.settings.lock().unwrap();
+                let max_queue_length = value.get_some().unwrap();
+                gst_debug!(
+                    self.cat,
+                    obj: basesrc,
+                    "Changing max-queue-length from {} to {}",
+                    settings.max_queue_length,
+                    max_queue_length,
+                );
+                settings.max_queue_length = max_queue_length;
+            }
             subclass::Property("bandwidth", ..) => {
                 let mut settings = self.settings.lock().unwrap();
                 let bandwidth = value.get_some().unwrap();
@@ -364,6 +389,10 @@ impl ObjectImpl for NdiVideoSrc {
             subclass::Property("timeout", ..) => {
                 let settings = self.settings.lock().unwrap();
                 Ok(settings.timeout.to_value())
+            }
+            subclass::Property("max-queue-length", ..) => {
+                let settings = self.settings.lock().unwrap();
+                Ok(settings.max_queue_length.to_value())
             }
             subclass::Property("bandwidth", ..) => {
                 let settings = self.settings.lock().unwrap();
@@ -451,6 +480,7 @@ impl BaseSrcImpl for NdiVideoSrc {
             settings.bandwidth,
             settings.timestamp_mode,
             settings.timeout,
+            settings.max_queue_length as usize,
         );
 
         // settings.id_receiver exists
