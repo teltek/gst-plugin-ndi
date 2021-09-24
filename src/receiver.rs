@@ -1,6 +1,6 @@
 use glib::prelude::*;
 use gst::prelude::*;
-use gst::{gst_debug, gst_element_error, gst_error, gst_log, gst_warning};
+use gst::{gst_debug, gst_error, gst_log, gst_warning};
 use gst_video::prelude::*;
 
 use byte_slice_cast::AsMutSliceOf;
@@ -167,15 +167,14 @@ impl Observations {
         &self,
         cat: gst::DebugCategory,
         element: &gst_base::BaseSrc,
-        time: (gst::ClockTime, gst::ClockTime),
-        duration: gst::ClockTime,
-    ) -> (gst::ClockTime, gst::ClockTime) {
-        assert!(time.1.is_some());
+        time: (Option<gst::ClockTime>, gst::ClockTime),
+        duration: Option<gst::ClockTime>,
+    ) -> (gst::ClockTime, Option<gst::ClockTime>) {
         if time.0.is_none() {
             return (time.1, duration);
         }
 
-        let time = (time.0.unwrap(), time.1.unwrap());
+        let time = (time.0.unwrap(), time.1);
 
         let mut inner = self.0.lock().unwrap();
         let ObservationsInner {
@@ -190,8 +189,8 @@ impl Observations {
         } = *inner;
 
         if values.is_empty() {
-            current_mapping.xbase = time.0;
-            current_mapping.b = time.1;
+            current_mapping.xbase = time.0.nseconds();
+            current_mapping.b = time.1.nseconds();
             current_mapping.num = 1;
             current_mapping.den = 1;
         }
@@ -207,7 +206,9 @@ impl Observations {
 
                 // Start by first updating every frame, then every second frame, then every third
                 // frame, etc. until we update once every quarter second
-                let framerate = (gst::SECOND / duration).unwrap_or(25) as usize;
+                let framerate = gst::ClockTime::SECOND
+                    .checked_div(duration.unwrap_or(40 * gst::ClockTime::MSECOND).nseconds())
+                    .unwrap_or(25) as usize;
 
                 if *skip_period < framerate / 4 + 1 {
                     *skip_period += 1;
@@ -221,7 +222,7 @@ impl Observations {
             if values.len() == WINDOW_LENGTH {
                 values.remove(0);
             }
-            values.push(time);
+            values.push((time.0.nseconds(), time.1.nseconds()));
 
             if let Some((num, den, b, xbase, r_squared)) =
                 gst::calculate_linear_regression(values, Some(values_tmp))
@@ -236,8 +237,8 @@ impl Observations {
                     obj: element,
                     "Calculated new time mapping: GStreamer time = {} * (NDI time - {}) + {} ({})",
                     next_mapping.num as f64 / next_mapping.den as f64,
-                    gst::ClockTime::from(next_mapping.xbase),
-                    gst::ClockTime::from(next_mapping.b),
+                    gst::ClockTime::from_nseconds(next_mapping.xbase),
+                    gst::ClockTime::from_nseconds(next_mapping.b),
                     r_squared,
                 );
             }
@@ -250,81 +251,72 @@ impl Observations {
 
         if *time_mapping_pending {
             let expected = gst::Clock::adjust_with_calibration(
-                time.0.into(),
-                current_mapping.xbase.into(),
-                current_mapping.b.into(),
-                current_mapping.num.into(),
-                current_mapping.den.into(),
+                time.0,
+                gst::ClockTime::from_nseconds(current_mapping.xbase),
+                gst::ClockTime::from_nseconds(current_mapping.b),
+                gst::ClockTime::from_nseconds(current_mapping.num),
+                gst::ClockTime::from_nseconds(current_mapping.den),
             );
             let new_calculated = gst::Clock::adjust_with_calibration(
-                time.0.into(),
-                next_mapping.xbase.into(),
-                next_mapping.b.into(),
-                next_mapping.num.into(),
-                next_mapping.den.into(),
+                time.0,
+                gst::ClockTime::from_nseconds(next_mapping.xbase),
+                gst::ClockTime::from_nseconds(next_mapping.b),
+                gst::ClockTime::from_nseconds(next_mapping.num),
+                gst::ClockTime::from_nseconds(next_mapping.den),
             );
 
-            if let (Some(expected), Some(new_calculated)) = (*expected, *new_calculated) {
-                let diff = if new_calculated > expected {
-                    new_calculated - expected
-                } else {
-                    expected - new_calculated
-                };
-
-                // Allow at most 5% frame duration or 2ms difference per frame
-                let max_diff = cmp::max(
-                    (duration / 10).unwrap_or(2 * gst::MSECOND_VAL),
-                    2 * gst::MSECOND_VAL,
-                );
-
-                if diff > max_diff {
-                    gst_debug!(
-                        cat,
-                        obj: element,
-                        "New time mapping causes difference {} but only {} allowed",
-                        gst::ClockTime::from(diff),
-                        gst::ClockTime::from(max_diff),
-                    );
-
-                    if new_calculated > expected {
-                        current_mapping.b = expected + max_diff;
-                        current_mapping.xbase = time.0;
-                    } else {
-                        current_mapping.b = expected - max_diff;
-                        current_mapping.xbase = time.0;
-                    }
-                } else {
-                    *current_mapping = *next_mapping;
-                }
+            let diff = if new_calculated > expected {
+                new_calculated - expected
             } else {
-                gst_warning!(
+                expected - new_calculated
+            };
+
+            // Allow at most 5% frame duration or 2ms difference per frame
+            let max_diff = cmp::max(
+                (duration.map(|d| d / 10)).unwrap_or(2 * gst::ClockTime::MSECOND),
+                2 * gst::ClockTime::MSECOND,
+            );
+
+            if diff > max_diff {
+                gst_debug!(
                     cat,
                     obj: element,
-                    "Failed to calculate timestamps based on new mapping",
+                    "New time mapping causes difference {} but only {} allowed",
+                    diff,
+                    max_diff,
                 );
+
+                if new_calculated > expected {
+                    current_mapping.b = (expected + max_diff).nseconds();
+                    current_mapping.xbase = time.0.nseconds();
+                } else {
+                    current_mapping.b = (expected - max_diff).nseconds();
+                    current_mapping.xbase = time.0.nseconds();
+                }
+            } else {
+                *current_mapping = *next_mapping;
             }
         }
 
         let converted_timestamp = gst::Clock::adjust_with_calibration(
-            time.0.into(),
-            current_mapping.xbase.into(),
-            current_mapping.b.into(),
-            current_mapping.num.into(),
-            current_mapping.den.into(),
+            time.0,
+            gst::ClockTime::from_nseconds(current_mapping.xbase),
+            gst::ClockTime::from_nseconds(current_mapping.b),
+            gst::ClockTime::from_nseconds(current_mapping.num),
+            gst::ClockTime::from_nseconds(current_mapping.den),
         );
-        let converted_duration = duration
-            .mul_div_floor(current_mapping.num, current_mapping.den)
-            .unwrap_or(gst::CLOCK_TIME_NONE);
+        let converted_duration =
+            duration.and_then(|d| d.mul_div_floor(current_mapping.num, current_mapping.den));
 
         gst_debug!(
             cat,
             obj: element,
             "Converted timestamp {}/{} to {}, duration {} to {}",
-            gst::ClockTime::from(time.0),
-            gst::ClockTime::from(time.1),
-            converted_timestamp,
-            duration,
-            converted_duration,
+            time.0,
+            time.1,
+            converted_timestamp.display(),
+            duration.display(),
+            converted_duration.display(),
         );
 
         (converted_timestamp, converted_duration)
@@ -422,7 +414,7 @@ impl<T: ReceiverType> Receiver<T> {
                 Err(_) => {
                     if let Some(receiver) = weak.upgrade().map(Receiver) {
                         if let Some(element) = receiver.0.element.upgrade() {
-                            gst_element_error!(
+                            gst::element_error!(
                                 element,
                                 gst::LibraryError::Failed,
                                 ["Panic while connecting to NDI source"]
@@ -558,7 +550,7 @@ where
             if (receiver.video.is_some() || !T::IS_VIDEO)
                 && (receiver.audio.is_some() || T::IS_VIDEO)
             {
-                gst_element_error!(
+                gst::element_error!(
                     element,
                     gst::ResourceError::OpenRead,
                     [
@@ -595,14 +587,14 @@ where
 
     // FIXME: Ideally we would use NDIlib_recv_color_format_fastest here but that seems to be
     // broken with interlaced content currently
-    let recv = RecvInstance::builder(ndi_name, url_address, &receiver_ndi_name)
+    let recv = RecvInstance::builder(ndi_name, url_address, receiver_ndi_name)
         .bandwidth(bandwidth)
         .color_format(NDIlib_recv_color_format_e::NDIlib_recv_color_format_UYVY_BGRA)
         .allow_video_fields(true)
         .build();
     let recv = match recv {
         None => {
-            gst_element_error!(
+            gst::element_error!(
                 element,
                 gst::CoreError::Negotiation,
                 ["Failed to connect to source"]
@@ -785,44 +777,42 @@ impl<T: ReceiverType> Receiver<T> {
         element: &gst_base::BaseSrc,
         timestamp: i64,
         timecode: i64,
-        duration: gst::ClockTime,
-    ) -> Option<(gst::ClockTime, gst::ClockTime)> {
-        let clock = match element.get_clock() {
-            None => return None,
-            Some(clock) => clock,
-        };
+        duration: Option<gst::ClockTime>,
+    ) -> Option<(gst::ClockTime, Option<gst::ClockTime>)> {
+        let clock = element.clock()?;
 
         // For now take the current running time as PTS. At a later time we
         // will want to work with the timestamp given by the NDI SDK if available
-        let now = clock.get_time();
-        let base_time = element.get_base_time();
+        let now = clock.time()?;
+        let base_time = element.base_time()?;
         let receive_time = now - base_time;
 
-        let real_time_now = gst::ClockTime::from(glib::get_real_time() as u64 * 1000);
+        let real_time_now = gst::ClockTime::from_nseconds(glib::real_time() as u64 * 1000);
         let timestamp = if timestamp == ndisys::NDIlib_recv_timestamp_undefined {
-            gst::CLOCK_TIME_NONE
+            gst::ClockTime::NONE
         } else {
-            gst::ClockTime::from(timestamp as u64 * 100)
+            Some(gst::ClockTime::from_nseconds(timestamp as u64 * 100))
         };
-        let timecode = gst::ClockTime::from(timecode as u64 * 100);
+        let timecode = gst::ClockTime::from_nseconds(timecode as u64 * 100);
 
         gst_log!(
             self.0.cat,
             obj: element,
             "Received frame with timecode {}, timestamp {}, duration {}, receive time {}, local time now {}",
             timecode,
-            timestamp,
-            duration,
-            receive_time,
+            timestamp.display(),
+            duration.display(),
+            receive_time.display(),
             real_time_now,
         );
 
         let (pts, duration) = match self.0.timestamp_mode {
-            TimestampMode::ReceiveTimeTimecode => {
-                self.0
-                    .observations
-                    .process(self.0.cat, element, (timecode, receive_time), duration)
-            }
+            TimestampMode::ReceiveTimeTimecode => self.0.observations.process(
+                self.0.cat,
+                element,
+                (Some(timecode), receive_time),
+                duration,
+            ),
             TimestampMode::ReceiveTimeTimestamp => self.0.observations.process(
                 self.0.cat,
                 element,
@@ -833,10 +823,11 @@ impl<T: ReceiverType> Receiver<T> {
             TimestampMode::Timestamp if timestamp.is_none() => (receive_time, duration),
             TimestampMode::Timestamp => {
                 // Timestamps are relative to the UNIX epoch
+                let timestamp = timestamp?;
                 if real_time_now > timestamp {
                     let diff = real_time_now - timestamp;
                     if diff > receive_time {
-                        (0.into(), duration)
+                        (gst::ClockTime::ZERO, duration)
                     } else {
                         (receive_time - diff, duration)
                     }
@@ -851,8 +842,8 @@ impl<T: ReceiverType> Receiver<T> {
             self.0.cat,
             obj: element,
             "Calculated PTS {}, duration {}",
-            pts,
-            duration,
+            pts.display(),
+            duration.display(),
         );
 
         Some((pts, duration))
@@ -909,7 +900,7 @@ impl Receiver<VideoReceiver> {
 
             let video_frame = match res {
                 Err(_) => {
-                    gst_element_error!(
+                    gst::element_error!(
                         element,
                         gst::ResourceError::Read,
                         ["Error receiving frame"]
@@ -970,13 +961,11 @@ impl Receiver<VideoReceiver> {
         &self,
         element: &gst_base::BaseSrc,
         video_frame: &VideoFrame,
-    ) -> Option<(gst::ClockTime, gst::ClockTime)> {
-        let duration = gst::SECOND
-            .mul_div_floor(
-                video_frame.frame_rate().1 as u64,
-                video_frame.frame_rate().0 as u64,
-            )
-            .unwrap_or(gst::CLOCK_TIME_NONE);
+    ) -> Option<(gst::ClockTime, Option<gst::ClockTime>)> {
+        let duration = gst::ClockTime::SECOND.mul_div_floor(
+            video_frame.frame_rate().1 as u64,
+            video_frame.frame_rate().0 as u64,
+        );
 
         self.calculate_timestamp(
             element,
@@ -1004,7 +993,7 @@ impl Receiver<VideoReceiver> {
             ndisys::NDIlib_FourCC_video_type_RGBA => gst_video::VideoFormat::Rgba,
             ndisys::NDIlib_FourCC_video_type_RGBX => gst_video::VideoFormat::Rgbx,
             _ => {
-                gst_element_error!(
+                gst::element_error!(
                     element,
                     gst::StreamError::Format,
                     ["Unsupported video fourcc {:08x}", video_frame.fourcc()]
@@ -1045,7 +1034,7 @@ impl Receiver<VideoReceiver> {
             }
 
             builder.build().map_err(|_| {
-                gst_element_error!(
+                gst::element_error!(
                     element,
                     gst::StreamError::Format,
                     ["Invalid video format configuration"]
@@ -1062,7 +1051,7 @@ impl Receiver<VideoReceiver> {
                 && video_frame.frame_format_type()
                     != ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_interleaved
             {
-                gst_element_error!(
+                gst::element_error!(
                     element,
                     gst::StreamError::Format,
                     ["Separate field interlacing not supported"]
@@ -1094,7 +1083,7 @@ impl Receiver<VideoReceiver> {
             }
 
             builder.build().map_err(|_| {
-                gst_element_error!(
+                gst::element_error!(
                     element,
                     gst::StreamError::Format,
                     ["Invalid video format configuration"]
@@ -1109,7 +1098,7 @@ impl Receiver<VideoReceiver> {
         &self,
         element: &gst_base::BaseSrc,
         pts: gst::ClockTime,
-        duration: gst::ClockTime,
+        duration: Option<gst::ClockTime>,
         info: &gst_video::VideoInfo,
         video_frame: &VideoFrame,
     ) -> gst::Buffer {
@@ -1124,15 +1113,15 @@ impl Receiver<VideoReceiver> {
                 gst::ReferenceTimestampMeta::add(
                     buffer,
                     &*TIMECODE_CAPS,
-                    gst::ClockTime::from(video_frame.timecode() as u64 * 100),
-                    gst::CLOCK_TIME_NONE,
+                    gst::ClockTime::from_nseconds(video_frame.timecode() as u64 * 100),
+                    gst::ClockTime::NONE,
                 );
                 if video_frame.timestamp() != ndisys::NDIlib_recv_timestamp_undefined {
                     gst::ReferenceTimestampMeta::add(
                         buffer,
                         &*TIMESTAMP_CAPS,
-                        gst::ClockTime::from(video_frame.timestamp() as u64 * 100),
-                        gst::CLOCK_TIME_NONE,
+                        gst::ClockTime::from_nseconds(video_frame.timestamp() as u64 * 100),
+                        gst::ClockTime::NONE,
                     );
                 }
             }
@@ -1337,7 +1326,7 @@ impl Receiver<AudioReceiver> {
 
             let audio_frame = match res {
                 Err(_) => {
-                    gst_element_error!(
+                    gst::element_error!(
                         element,
                         gst::ResourceError::Read,
                         ["Error receiving frame"]
@@ -1398,13 +1387,11 @@ impl Receiver<AudioReceiver> {
         &self,
         element: &gst_base::BaseSrc,
         audio_frame: &AudioFrame,
-    ) -> Option<(gst::ClockTime, gst::ClockTime)> {
-        let duration = gst::SECOND
-            .mul_div_floor(
-                audio_frame.no_samples() as u64,
-                audio_frame.sample_rate() as u64,
-            )
-            .unwrap_or(gst::CLOCK_TIME_NONE);
+    ) -> Option<(gst::ClockTime, Option<gst::ClockTime>)> {
+        let duration = gst::ClockTime::SECOND.mul_div_floor(
+            audio_frame.no_samples() as u64,
+            audio_frame.sample_rate() as u64,
+        );
 
         self.calculate_timestamp(
             element,
@@ -1426,7 +1413,7 @@ impl Receiver<AudioReceiver> {
         );
 
         builder.build().map_err(|_| {
-            gst_element_error!(
+            gst::element_error!(
                 element,
                 gst::StreamError::Format,
                 ["Invalid audio format configuration"]
@@ -1440,7 +1427,7 @@ impl Receiver<AudioReceiver> {
         &self,
         _element: &gst_base::BaseSrc,
         pts: gst::ClockTime,
-        duration: gst::ClockTime,
+        duration: Option<gst::ClockTime>,
         info: &gst_audio::AudioInfo,
         audio_frame: &AudioFrame,
     ) -> gst::Buffer {
@@ -1458,15 +1445,15 @@ impl Receiver<AudioReceiver> {
                 gst::ReferenceTimestampMeta::add(
                     buffer,
                     &*TIMECODE_CAPS,
-                    gst::ClockTime::from(audio_frame.timecode() as u64 * 100),
-                    gst::CLOCK_TIME_NONE,
+                    gst::ClockTime::from_nseconds(audio_frame.timecode() as u64 * 100),
+                    gst::ClockTime::NONE,
                 );
                 if audio_frame.timestamp() != ndisys::NDIlib_recv_timestamp_undefined {
                     gst::ReferenceTimestampMeta::add(
                         buffer,
                         &*TIMESTAMP_CAPS,
-                        gst::ClockTime::from(audio_frame.timestamp() as u64 * 100),
-                        gst::CLOCK_TIME_NONE,
+                        gst::ClockTime::from_nseconds(audio_frame.timestamp() as u64 * 100),
+                        gst::ClockTime::NONE,
                     );
                 }
             }

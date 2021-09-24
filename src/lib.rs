@@ -1,5 +1,3 @@
-use glib::prelude::*;
-
 mod device_provider;
 pub mod ndi;
 mod ndiaudiosrc;
@@ -38,7 +36,7 @@ pub enum TimestampMode {
 
 fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
     if !ndi::initialize() {
-        return Err(glib::glib_bool_error!("Cannot initialize NDI"));
+        return Err(glib::bool_error!("Cannot initialize NDI"));
     }
 
     device_provider::register(plugin)?;
@@ -68,7 +66,7 @@ static TIMECODE_CAPS: Lazy<gst::Caps> =
 static TIMESTAMP_CAPS: Lazy<gst::Caps> =
     Lazy::new(|| gst::Caps::new_simple("timestamp/x-ndi-timestamp", &[]));
 
-gst::gst_plugin_define!(
+gst::plugin_define!(
     ndi,
     env!("CARGO_PKG_DESCRIPTION"),
     plugin_init,

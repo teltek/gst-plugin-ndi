@@ -420,7 +420,7 @@ pub struct SendInstance(ptr::NonNull<::std::os::raw::c_void>);
 unsafe impl Send for SendInstance {}
 
 impl SendInstance {
-    pub fn builder<'a>(ndi_name: &'a str) -> SendBuilder<'a> {
+    pub fn builder(ndi_name: &str) -> SendBuilder {
         SendBuilder {
             ndi_name,
             clock_video: false,
@@ -749,7 +749,7 @@ impl<'a> VideoFrame<'a> {
 impl<'a> Drop for VideoFrame<'a> {
     #[allow(irrefutable_let_patterns)]
     fn drop(&mut self) {
-        if let VideoFrame::BorrowedRecv(ref mut frame, ref recv) = *self {
+        if let VideoFrame::BorrowedRecv(ref mut frame, recv) = *self {
             unsafe {
                 NDIlib_recv_free_video_v2(((recv.0).0).0.as_ptr() as *mut _, frame);
             }
@@ -918,7 +918,7 @@ impl<'a> AudioFrame<'a> {
 impl<'a> Drop for AudioFrame<'a> {
     #[allow(irrefutable_let_patterns)]
     fn drop(&mut self) {
-        if let AudioFrame::BorrowedRecv(ref mut frame, ref recv) = *self {
+        if let AudioFrame::BorrowedRecv(ref mut frame, recv) = *self {
             unsafe {
                 NDIlib_recv_free_audio_v2(((recv.0).0).0.as_ptr() as *mut _, frame);
             }
@@ -1010,7 +1010,7 @@ impl<'a> Default for MetadataFrame<'a> {
 
 impl<'a> Drop for MetadataFrame<'a> {
     fn drop(&mut self) {
-        if let MetadataFrame::Borrowed(ref mut frame, ref recv) = *self {
+        if let MetadataFrame::Borrowed(ref mut frame, recv) = *self {
             unsafe {
                 NDIlib_recv_free_metadata(((recv.0).0).0.as_ptr() as *mut _, frame);
             }

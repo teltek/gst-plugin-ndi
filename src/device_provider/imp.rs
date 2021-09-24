@@ -1,4 +1,3 @@
-use glib::subclass;
 use gst::prelude::*;
 use gst::subclass::prelude::*;
 use gst::{gst_error, gst_log, gst_trace};
@@ -9,24 +8,24 @@ use std::sync::atomic;
 use std::sync::Mutex;
 use std::thread;
 
+use once_cell::sync::Lazy;
+
 use crate::ndi;
 
 #[derive(Debug)]
-struct DeviceProvider {
+pub struct DeviceProvider {
     cat: gst::DebugCategory,
     thread: Mutex<Option<thread::JoinHandle<()>>>,
-    current_devices: Mutex<Vec<gst::Device>>,
+    current_devices: Mutex<Vec<super::Device>>,
     find: Mutex<Option<ndi::FindInstance>>,
     is_running: atomic::AtomicBool,
 }
 
+#[glib::object_subclass]
 impl ObjectSubclass for DeviceProvider {
     const NAME: &'static str = "NdiDeviceProvider";
+    type Type = super::DeviceProvider;
     type ParentType = gst::DeviceProvider;
-    type Instance = subclass::simple::InstanceStruct<Self>;
-    type Class = subclass::simple::ClassStruct<Self>;
-
-    glib::glib_object_subclass!();
 
     fn new() -> Self {
         Self {
@@ -41,26 +40,32 @@ impl ObjectSubclass for DeviceProvider {
             is_running: atomic::AtomicBool::new(false),
         }
     }
-
-    fn class_init(klass: &mut subclass::simple::ClassStruct<Self>) {
-        klass.set_metadata(
-            "NewTek NDI Device Provider",
-            "Source/Audio/Video/Network",
-            "NewTek NDI Device Provider",
-            "Ruben Gonzalez <rubenrua@teltek.es>, Daniel Vilar <daniel.peiteado@teltek.es>, Sebastian Dröge <sebastian@centricular.com>",
-        );
-    }
 }
 
-impl ObjectImpl for DeviceProvider {
-    glib::glib_object_impl!();
-}
+impl ObjectImpl for DeviceProvider {}
 
 impl DeviceProviderImpl for DeviceProvider {
-    fn probe(&self, _device_provider: &gst::DeviceProvider) -> Vec<gst::Device> {
-        self.current_devices.lock().unwrap().clone()
+    fn metadata() -> Option<&'static gst::subclass::DeviceProviderMetadata> {
+        static METADATA: Lazy<gst::subclass::DeviceProviderMetadata> = Lazy::new(|| {
+            gst::subclass::DeviceProviderMetadata::new("NewTek NDI Device Provider",
+            "Source/Audio/Video/Network",
+            "NewTek NDI Device Provider",
+            "Ruben Gonzalez <rubenrua@teltek.es>, Daniel Vilar <daniel.peiteado@teltek.es>, Sebastian Dröge <sebastian@centricular.com>")
+        });
+
+        Some(&*METADATA)
     }
-    fn start(&self, device_provider: &gst::DeviceProvider) -> Result<(), gst::LoggableError> {
+
+    fn probe(&self, _device_provider: &Self::Type) -> Vec<gst::Device> {
+        self.current_devices
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|d| d.clone().upcast())
+            .collect()
+    }
+
+    fn start(&self, device_provider: &Self::Type) -> Result<(), gst::LoggableError> {
         let mut thread_guard = self.thread.lock().unwrap();
         if thread_guard.is_some() {
             gst_log!(
@@ -121,7 +126,8 @@ impl DeviceProviderImpl for DeviceProvider {
 
         Ok(())
     }
-    fn stop(&self, _device_provider: &gst::DeviceProvider) {
+
+    fn stop(&self, _device_provider: &Self::Type) {
         if let Some(_thread) = self.thread.lock().unwrap().take() {
             self.is_running.store(false, atomic::Ordering::SeqCst);
             // Don't actually join because that might take a while
@@ -130,7 +136,7 @@ impl DeviceProviderImpl for DeviceProvider {
 }
 
 impl DeviceProvider {
-    fn poll(&self, device_provider: &gst::DeviceProvider, first: bool) {
+    fn poll(&self, device_provider: &super::DeviceProvider, first: bool) {
         let mut find_guard = self.find.lock().unwrap();
         let find = match *find_guard {
             None => return,
@@ -189,11 +195,11 @@ impl DeviceProvider {
                 source
             );
             // Add once for audio, another time for video
-            let device = Device::new(&source, true);
+            let device = super::Device::new(&source, true);
             device_provider.device_add(&device);
             current_devices_guard.push(device);
 
-            let device = Device::new(&source, false);
+            let device = super::Device::new(&source, false);
             device_provider.device_add(&device);
             current_devices_guard.push(device);
         }
@@ -201,18 +207,16 @@ impl DeviceProvider {
 }
 
 #[derive(Debug)]
-struct Device {
+pub struct Device {
     cat: gst::DebugCategory,
     source: OnceCell<(ndi::Source<'static>, glib::Type)>,
 }
 
+#[glib::object_subclass]
 impl ObjectSubclass for Device {
     const NAME: &'static str = "NdiDevice";
+    type Type = super::Device;
     type ParentType = gst::Device;
-    type Instance = subclass::simple::InstanceStruct<Self>;
-    type Class = subclass::simple::ClassStruct<Self>;
-
-    glib::glib_object_subclass!();
 
     fn new() -> Self {
         Self {
@@ -226,18 +230,16 @@ impl ObjectSubclass for Device {
     }
 }
 
-impl ObjectImpl for Device {
-    glib::glib_object_impl!();
-}
+impl ObjectImpl for Device {}
 
 impl DeviceImpl for Device {
     fn create_element(
         &self,
-        _device: &gst::Device,
+        _device: &Self::Type,
         name: Option<&str>,
     ) -> Result<gst::Element, gst::LoggableError> {
         let source_info = self.source.get().unwrap();
-        let element = glib::Object::new(
+        let element = glib::Object::with_type(
             source_info.1,
             &[
                 ("name", &name),
@@ -253,8 +255,8 @@ impl DeviceImpl for Device {
     }
 }
 
-impl Device {
-    fn new(source: &ndi::Source<'_>, is_audio: bool) -> gst::Device {
+impl super::Device {
+    fn new(source: &ndi::Source<'_>, is_audio: bool) -> super::Device {
         let display_name = format!(
             "{} ({})",
             source.ndi_name(),
@@ -267,13 +269,13 @@ impl Device {
 
         // Get the caps from the template caps of the corresponding source element
         let element_type = if is_audio {
-            crate::ndiaudiosrc::NdiAudioSrc::get_type()
+            crate::ndiaudiosrc::NdiAudioSrc::static_type()
         } else {
-            crate::ndivideosrc::NdiVideoSrc::get_type()
+            crate::ndivideosrc::NdiVideoSrc::static_type()
         };
-        let element_class = gst::ElementClass::from_type(element_type).unwrap();
-        let templ = element_class.get_pad_template("src").unwrap();
-        let caps = templ.get_caps().unwrap();
+        let element_class = glib::Class::<gst::Element>::from_type(element_type).unwrap();
+        let templ = element_class.pad_template("src").unwrap();
+        let caps = templ.caps();
 
         // Put the url-address into the extra properties
         let extra_properties = gst::Structure::builder("properties")
@@ -281,17 +283,12 @@ impl Device {
             .field("url-address", &source.url_address())
             .build();
 
-        let device = glib::Object::new(
-            Device::get_type(),
-            &[
-                ("caps", &caps),
-                ("display-name", &display_name),
-                ("device-class", &device_class),
-                ("properties", &extra_properties),
-            ],
-        )
-        .unwrap()
-        .dynamic_cast::<gst::Device>()
+        let device = glib::Object::new::<super::Device>(&[
+            ("caps", &caps),
+            ("display-name", &display_name),
+            ("device-class", &device_class),
+            ("properties", &extra_properties),
+        ])
         .unwrap();
         let device_impl = Device::from_instance(&device);
 
@@ -302,13 +299,4 @@ impl Device {
 
         device
     }
-}
-
-pub fn register(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
-    gst::DeviceProvider::register(
-        Some(plugin),
-        "ndideviceprovider",
-        gst::Rank::Primary,
-        DeviceProvider::get_type(),
-    )
 }
