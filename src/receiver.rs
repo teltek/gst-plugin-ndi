@@ -679,6 +679,7 @@ impl Receiver {
                     (receive_time + diff, duration)
                 }
             }
+            TimestampMode::ReceiveTime => (receive_time, duration),
         };
 
         gst_log!(
