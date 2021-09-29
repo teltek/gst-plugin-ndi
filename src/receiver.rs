@@ -7,99 +7,57 @@ use byte_slice_cast::AsMutSliceOf;
 
 use std::cmp;
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::thread;
 
-use once_cell::sync::Lazy;
-
 use super::*;
 
-pub struct ReceiverInfo {
-    id: usize,
-    ndi_name: Option<String>,
-    url_address: Option<String>,
-    recv: RecvInstance,
-    video: Option<Weak<ReceiverInner<VideoReceiver>>>,
-    audio: Option<Weak<ReceiverInner<AudioReceiver>>>,
-    observations: Observations,
-}
-
-static HASHMAP_RECEIVERS: Lazy<Mutex<HashMap<usize, ReceiverInfo>>> = Lazy::new(|| {
-    let m = HashMap::new();
-    Mutex::new(m)
+static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
+    gst::DebugCategory::new(
+        "ndireceiver",
+        gst::DebugColorFlags::empty(),
+        Some("NewTek NDI receiver"),
+    )
 });
 
-static ID_RECEIVER: AtomicUsize = AtomicUsize::new(0);
+#[derive(Clone)]
+pub struct Receiver(Arc<ReceiverInner>);
 
-pub trait ReceiverType: 'static {
-    type InfoType: Send + 'static;
-    const IS_VIDEO: bool;
-}
-
-pub enum AudioReceiver {}
-pub enum VideoReceiver {}
-
-impl ReceiverType for AudioReceiver {
-    type InfoType = gst_audio::AudioInfo;
-    const IS_VIDEO: bool = false;
-}
-
-impl ReceiverType for VideoReceiver {
-    type InfoType = gst_video::VideoInfo;
-    const IS_VIDEO: bool = true;
-}
-
-pub struct Receiver<T: ReceiverType>(Arc<ReceiverInner<T>>);
-
-impl<T: ReceiverType> Clone for Receiver<T> {
-    fn clone(&self) -> Self {
-        Receiver(self.0.clone())
-    }
+#[derive(Debug)]
+pub enum Buffer {
+    Audio(gst::Buffer, gst_audio::AudioInfo),
+    Video(gst::Buffer, gst_video::VideoInfo),
 }
 
 #[derive(Debug)]
-pub enum ReceiverItem<T: ReceiverType> {
-    Buffer(gst::Buffer, T::InfoType),
+pub enum ReceiverItem {
+    Buffer(Buffer),
     Flushing,
     Timeout,
     Error(gst::FlowError),
 }
 
-pub struct ReceiverInner<T: ReceiverType> {
-    id: usize,
-
-    queue: ReceiverQueue<T>,
+pub struct ReceiverInner {
+    queue: ReceiverQueue,
     max_queue_length: usize,
-
-    recv: Mutex<RecvInstance>,
 
     observations: Observations,
 
-    cat: gst::DebugCategory,
     element: glib::WeakRef<gst_base::BaseSrc>,
     timestamp_mode: TimestampMode,
 
-    first_frame: AtomicBool,
     timeout: u32,
     connect_timeout: u32,
 
     thread: Mutex<Option<std::thread::JoinHandle<()>>>,
 }
 
-struct ReceiverQueue<T: ReceiverType>(Arc<(Mutex<ReceiverQueueInner<T>>, Condvar)>);
+#[derive(Clone)]
+struct ReceiverQueue(Arc<(Mutex<ReceiverQueueInner>, Condvar)>);
 
-impl<T: ReceiverType> Clone for ReceiverQueue<T> {
-    fn clone(&self) -> Self {
-        ReceiverQueue(self.0.clone())
-    }
-}
-
-struct ReceiverQueueInner<T: ReceiverType> {
-    // If we should be capturing at all or go out of our capture loop
-    //
-    // This is true as long as the source element is in Paused/Playing
-    capturing: bool,
+struct ReceiverQueueInner {
+    // Set to true when the capture thread should be stopped
+    shutdown: bool,
 
     // If we're flushing right now and all buffers should simply be discarded
     // and capture() directly returns Flushing
@@ -110,7 +68,7 @@ struct ReceiverQueueInner<T: ReceiverType> {
     // Queue containing our buffers. This holds at most 5 buffers at a time.
     //
     // On timeout/error will contain a single item and then never be filled again
-    buffer_queue: VecDeque<(gst::Buffer, T::InfoType)>,
+    buffer_queue: VecDeque<Buffer>,
 
     error: Option<gst::FlowError>,
     timeout: bool,
@@ -165,7 +123,6 @@ impl Observations {
 
     fn process(
         &self,
-        cat: gst::DebugCategory,
         element: &gst_base::BaseSrc,
         time: (Option<gst::ClockTime>, gst::ClockTime),
         duration: Option<gst::ClockTime>,
@@ -233,7 +190,7 @@ impl Observations {
                 next_mapping.den = den;
                 *time_mapping_pending = true;
                 gst_debug!(
-                    cat,
+                    CAT,
                     obj: element,
                     "Calculated new time mapping: GStreamer time = {} * (NDI time - {}) + {} ({})",
                     next_mapping.num as f64 / next_mapping.den as f64,
@@ -279,7 +236,7 @@ impl Observations {
 
             if diff > max_diff {
                 gst_debug!(
-                    cat,
+                    CAT,
                     obj: element,
                     "New time mapping causes difference {} but only {} allowed",
                     diff,
@@ -309,7 +266,7 @@ impl Observations {
             duration.and_then(|d| d.mul_div_floor(current_mapping.num, current_mapping.den));
 
         gst_debug!(
-            cat,
+            CAT,
             obj: element,
             "Converted timestamp {}/{} to {}, duration {} to {}",
             time.0,
@@ -334,19 +291,12 @@ impl Default for TimeMapping {
     }
 }
 
-pub struct ReceiverControlHandle<T: ReceiverType> {
-    queue: ReceiverQueue<T>,
+#[derive(Clone)]
+pub struct ReceiverControlHandle {
+    queue: ReceiverQueue,
 }
 
-impl<T: ReceiverType> Clone for ReceiverControlHandle<T> {
-    fn clone(&self) -> Self {
-        ReceiverControlHandle {
-            queue: self.queue.clone(),
-        }
-    }
-}
-
-impl<T: ReceiverType> ReceiverControlHandle<T> {
+impl ReceiverControlHandle {
     pub fn set_flushing(&self, flushing: bool) {
         let mut queue = (self.queue.0).0.lock().unwrap();
         queue.flushing = flushing;
@@ -360,29 +310,39 @@ impl<T: ReceiverType> ReceiverControlHandle<T> {
 
     pub fn shutdown(&self) {
         let mut queue = (self.queue.0).0.lock().unwrap();
-        queue.capturing = false;
+        queue.shutdown = true;
         (self.queue.0).1.notify_all();
     }
 }
 
-impl<T: ReceiverType> Receiver<T> {
+impl Drop for ReceiverInner {
+    fn drop(&mut self) {
+        // Will shut down the receiver thread on the next iteration
+        let mut queue = (self.queue.0).0.lock().unwrap();
+        queue.shutdown = true;
+        drop(queue);
+
+        let element = self.element.upgrade();
+
+        if let Some(ref element) = element {
+            gst_debug!(CAT, obj: element, "Closed NDI connection");
+        }
+    }
+}
+
+impl Receiver {
     fn new(
-        info: &mut ReceiverInfo,
+        recv: RecvInstance,
         timestamp_mode: TimestampMode,
         timeout: u32,
         connect_timeout: u32,
         max_queue_length: usize,
         element: &gst_base::BaseSrc,
-        cat: gst::DebugCategory,
-    ) -> Self
-    where
-        Receiver<T>: ReceiverCapture<T>,
-    {
+    ) -> Self {
         let receiver = Receiver(Arc::new(ReceiverInner {
-            id: info.id,
             queue: ReceiverQueue(Arc::new((
                 Mutex::new(ReceiverQueueInner {
-                    capturing: true,
+                    shutdown: false,
                     playing: false,
                     flushing: false,
                     buffer_queue: VecDeque::with_capacity(max_queue_length),
@@ -392,12 +352,9 @@ impl<T: ReceiverType> Receiver<T> {
                 Condvar::new(),
             ))),
             max_queue_length,
-            recv: Mutex::new(info.recv.clone()),
-            observations: info.observations.clone(),
-            cat,
+            observations: Observations::new(),
             element: element.downgrade(),
             timestamp_mode,
-            first_frame: AtomicBool::new(true),
             timeout,
             connect_timeout,
             thread: Mutex::new(None),
@@ -408,8 +365,9 @@ impl<T: ReceiverType> Receiver<T> {
             use std::panic;
 
             let weak_clone = weak.clone();
-            match panic::catch_unwind(panic::AssertUnwindSafe(move || receive_thread(&weak_clone)))
-            {
+            match panic::catch_unwind(panic::AssertUnwindSafe(move || {
+                Self::receive_thread(&weak_clone, recv)
+            })) {
                 Ok(_) => (),
                 Err(_) => {
                     if let Some(receiver) = weak.upgrade().map(Receiver) {
@@ -429,15 +387,12 @@ impl<T: ReceiverType> Receiver<T> {
             }
         });
 
-        let weak = Arc::downgrade(&receiver.0);
-        Self::store_internal(info, weak);
-
         *receiver.0.thread.lock().unwrap() = Some(thread);
 
         receiver
     }
 
-    pub fn receiver_control_handle(&self) -> ReceiverControlHandle<T> {
+    pub fn receiver_control_handle(&self) -> ReceiverControlHandle {
         ReceiverControlHandle {
             queue: self.0.queue.clone(),
         }
@@ -456,322 +411,212 @@ impl<T: ReceiverType> Receiver<T> {
 
     pub fn shutdown(&self) {
         let mut queue = (self.0.queue.0).0.lock().unwrap();
-        queue.capturing = false;
+        queue.shutdown = true;
         (self.0.queue.0).1.notify_all();
     }
 
-    pub fn capture(&self) -> ReceiverItem<T> {
+    pub fn capture(&self) -> ReceiverItem {
         let mut queue = (self.0.queue.0).0.lock().unwrap();
         loop {
             if let Some(err) = queue.error {
                 return ReceiverItem::Error(err);
             } else if queue.buffer_queue.is_empty() && queue.timeout {
                 return ReceiverItem::Timeout;
-            } else if queue.flushing || !queue.capturing {
+            } else if queue.flushing || queue.shutdown {
                 return ReceiverItem::Flushing;
-            } else if let Some((buffer, info)) = queue.buffer_queue.pop_front() {
-                return ReceiverItem::Buffer(buffer, info);
+            } else if let Some(buffer) = queue.buffer_queue.pop_front() {
+                return ReceiverItem::Buffer(buffer);
             }
 
             queue = (self.0.queue.0).1.wait(queue).unwrap();
         }
     }
-}
 
-impl<T: ReceiverType> Drop for ReceiverInner<T> {
-    fn drop(&mut self) {
-        // Will shut down the receiver thread on the next iteration
-        let mut queue = (self.queue.0).0.lock().unwrap();
-        queue.capturing = false;
-        drop(queue);
+    pub fn connect(
+        element: &gst_base::BaseSrc,
+        ndi_name: Option<&str>,
+        url_address: Option<&str>,
+        receiver_ndi_name: &str,
+        connect_timeout: u32,
+        bandwidth: NDIlib_recv_bandwidth_e,
+        timestamp_mode: TimestampMode,
+        timeout: u32,
+        max_queue_length: usize,
+    ) -> Option<Self> {
+        gst_debug!(CAT, obj: element, "Starting NDI connection...");
 
-        let element = self.element.upgrade();
+        assert!(ndi_name.is_some() || url_address.is_some());
 
-        if let Some(ref element) = element {
-            gst_debug!(self.cat, obj: element, "Closing NDI connection...");
-        }
+        gst_debug!(
+            CAT,
+            obj: element,
+            "Connecting to NDI source with NDI name '{:?}' and URL/Address {:?}",
+            ndi_name,
+            url_address,
+        );
 
-        let mut receivers = HASHMAP_RECEIVERS.lock().unwrap();
-        {
-            let receiver = receivers.get_mut(&self.id).unwrap();
-            if receiver.audio.is_some() && receiver.video.is_some() {
-                if T::IS_VIDEO {
-                    receiver.video = None;
-                } else {
-                    receiver.audio = None;
-                }
-                return;
-            }
-        }
-        receivers.remove(&self.id);
-
-        if let Some(ref element) = element {
-            gst_debug!(self.cat, obj: element, "Closed NDI connection");
-        }
-    }
-}
-
-pub fn connect_ndi<T: ReceiverType>(
-    cat: gst::DebugCategory,
-    element: &gst_base::BaseSrc,
-    ndi_name: Option<&str>,
-    url_address: Option<&str>,
-    receiver_ndi_name: &str,
-    connect_timeout: u32,
-    bandwidth: NDIlib_recv_bandwidth_e,
-    timestamp_mode: TimestampMode,
-    timeout: u32,
-    max_queue_length: usize,
-) -> Option<Receiver<T>>
-where
-    Receiver<T>: ReceiverCapture<T>,
-{
-    gst_debug!(cat, obj: element, "Starting NDI connection...");
-
-    assert!(ndi_name.is_some() || url_address.is_some());
-
-    let mut receivers = HASHMAP_RECEIVERS.lock().unwrap();
-
-    // Check if we already have a receiver for this very stream
-    for receiver in receivers.values_mut() {
-        // If both are provided they both must match, if only one is provided
-        // then that one has to match and the other one does not matter
-        if (ndi_name.is_some()
-            && url_address.is_some()
-            && receiver.ndi_name.as_deref() == ndi_name
-            && receiver.url_address.as_deref() == url_address)
-            || (ndi_name.is_some()
-                && url_address.is_none()
-                && receiver.ndi_name.as_deref() == ndi_name)
-            || (ndi_name.is_none()
-                && url_address.is_some()
-                && receiver.url_address.as_deref() == url_address)
-        {
-            if (receiver.video.is_some() || !T::IS_VIDEO)
-                && (receiver.audio.is_some() || T::IS_VIDEO)
-            {
+        // FIXME: Ideally we would use NDIlib_recv_color_format_fastest here but that seems to be
+        // broken with interlaced content currently
+        let recv = RecvInstance::builder(ndi_name, url_address, receiver_ndi_name)
+            .bandwidth(bandwidth)
+            .color_format(NDIlib_recv_color_format_e::NDIlib_recv_color_format_UYVY_BGRA)
+            .allow_video_fields(true)
+            .build();
+        let recv = match recv {
+            None => {
                 gst::element_error!(
                     element,
-                    gst::ResourceError::OpenRead,
-                    [
-                        "Source with NDI name '{:?}' / URL/address '{:?}' already in use for {}",
-                        receiver.ndi_name,
-                        receiver.url_address,
-                        if T::IS_VIDEO { "video" } else { "audio" }
-                    ]
+                    gst::CoreError::Negotiation,
+                    ["Failed to connect to source"]
                 );
-
                 return None;
+            }
+            Some(recv) => recv,
+        };
+
+        recv.set_tally(&Tally::default());
+
+        let enable_hw_accel = MetadataFrame::new(0, Some("<ndi_hwaccel enabled=\"true\"/>"));
+        recv.send_metadata(&enable_hw_accel);
+
+        // This will set info.audio/video accordingly
+        let receiver = Receiver::new(
+            recv,
+            timestamp_mode,
+            timeout,
+            connect_timeout,
+            max_queue_length,
+            element,
+        );
+
+        Some(receiver)
+    }
+
+    fn receive_thread(receiver: &Weak<ReceiverInner>, recv: RecvInstance) {
+        let mut first_frame = true;
+        let mut timer = time::Instant::now();
+
+        // Capture until error or shutdown
+        loop {
+            let receiver = match receiver.upgrade().map(Receiver) {
+                None => break,
+                Some(receiver) => receiver,
+            };
+
+            let element = match receiver.0.element.upgrade() {
+                None => return,
+                Some(element) => element,
+            };
+
+            let flushing = {
+                let queue = (receiver.0.queue.0).0.lock().unwrap();
+                if queue.shutdown {
+                    gst_debug!(CAT, obj: &element, "Shutting down");
+                    break;
+                }
+
+                // If an error happened in the meantime, just go out of here
+                if queue.error.is_some() {
+                    gst_error!(CAT, obj: &element, "Error while waiting for connection");
+                    return;
+                }
+
+                queue.flushing
+            };
+
+            let timeout = if first_frame {
+                receiver.0.connect_timeout
             } else {
-                return Some(Receiver::new(
-                    receiver,
-                    timestamp_mode,
-                    timeout,
-                    connect_timeout,
-                    max_queue_length,
-                    element,
-                    cat,
-                ));
-            }
-        }
-    }
+                receiver.0.timeout
+            };
 
-    // Otherwise create a new one and return it to the caller
-    gst_debug!(
-        cat,
-        obj: element,
-        "Connecting to NDI source with NDI name '{:?}' and URL/Address {:?}",
-        ndi_name,
-        url_address,
-    );
-
-    // FIXME: Ideally we would use NDIlib_recv_color_format_fastest here but that seems to be
-    // broken with interlaced content currently
-    let recv = RecvInstance::builder(ndi_name, url_address, receiver_ndi_name)
-        .bandwidth(bandwidth)
-        .color_format(NDIlib_recv_color_format_e::NDIlib_recv_color_format_UYVY_BGRA)
-        .allow_video_fields(true)
-        .build();
-    let recv = match recv {
-        None => {
-            gst::element_error!(
-                element,
-                gst::CoreError::Negotiation,
-                ["Failed to connect to source"]
-            );
-            return None;
-        }
-        Some(recv) => recv,
-    };
-
-    recv.set_tally(&Tally::default());
-
-    let enable_hw_accel = MetadataFrame::new(0, Some("<ndi_hwaccel enabled=\"true\"/>"));
-    recv.send_metadata(&enable_hw_accel);
-
-    let id_receiver = ID_RECEIVER.fetch_add(1, Ordering::SeqCst);
-    let mut info = ReceiverInfo {
-        id: id_receiver,
-        ndi_name: ndi_name.map(String::from),
-        url_address: url_address.map(String::from),
-        recv,
-        video: None,
-        audio: None,
-        observations: Observations::new(),
-    };
-
-    // This will set info.audio/video accordingly
-    let receiver = Receiver::new(
-        &mut info,
-        timestamp_mode,
-        timeout,
-        connect_timeout,
-        max_queue_length,
-        element,
-        cat,
-    );
-
-    receivers.insert(id_receiver, info);
-
-    Some(receiver)
-}
-
-fn receive_thread<T: ReceiverType>(receiver: &Weak<ReceiverInner<T>>)
-where
-    Receiver<T>: ReceiverCapture<T>,
-{
-    // Now first capture frames until the queues are empty so that we're sure that we output only
-    // the very latest frame that is available now
-    loop {
-        let receiver = match receiver.upgrade().map(Receiver) {
-            None => return,
-            Some(receiver) => receiver,
-        };
-
-        let element = match receiver.0.element.upgrade() {
-            None => return,
-            Some(element) => element,
-        };
-
-        {
-            let queue = (receiver.0.queue.0).0.lock().unwrap();
-            if !queue.capturing {
-                gst_debug!(receiver.0.cat, obj: &element, "Shutting down");
-                return;
-            }
-
-            // If an error happened in the meantime, just go out of here
-            if queue.error.is_some() {
-                gst_error!(
-                    receiver.0.cat,
-                    obj: &element,
-                    "Error while waiting for connection"
-                );
-                return;
-            }
-        }
-
-        let recv = receiver.0.recv.lock().unwrap();
-
-        let queue = recv.get_queue();
-        if (!T::IS_VIDEO && queue.audio_frames() <= 1) || (T::IS_VIDEO && queue.video_frames() <= 1)
-        {
-            break;
-        }
-
-        let _ = recv.capture(T::IS_VIDEO, !T::IS_VIDEO, false, 0);
-    }
-
-    // And if that went fine, capture until we're done
-    loop {
-        let receiver = match receiver.upgrade().map(Receiver) {
-            None => break,
-            Some(receiver) => receiver,
-        };
-
-        let element = match receiver.0.element.upgrade() {
-            None => return,
-            Some(element) => element,
-        };
-
-        {
-            let queue = (receiver.0.queue.0).0.lock().unwrap();
-            if !queue.capturing {
-                gst_debug!(receiver.0.cat, obj: &element, "Shutting down");
-                break;
-            }
-        }
-
-        let recv = receiver.0.recv.lock().unwrap();
-
-        let res = receiver.capture_internal(&element, &recv);
-
-        match res {
-            Ok(item) => {
-                let mut queue = (receiver.0.queue.0).0.lock().unwrap();
-                while queue.buffer_queue.len() > receiver.0.max_queue_length {
-                    gst_warning!(
-                        receiver.0.cat,
-                        obj: &element,
-                        "Dropping old buffer -- queue has {} items",
-                        queue.buffer_queue.len()
+            let res = match recv.capture(50) {
+                _ if flushing => {
+                    gst_debug!(CAT, obj: &element, "Flushing");
+                    Err(gst::FlowError::Flushing)
+                }
+                Err(_) => {
+                    gst::element_error!(
+                        element,
+                        gst::ResourceError::Read,
+                        ["Error receiving frame"]
                     );
-                    queue.buffer_queue.pop_front();
+                    Err(gst::FlowError::Error)
                 }
-                queue.buffer_queue.push_back(item);
-                (receiver.0.queue.0).1.notify_one();
-            }
-            Err(gst::FlowError::Eos) => {
-                gst_debug!(receiver.0.cat, obj: &element, "Signalling EOS");
-                let mut queue = (receiver.0.queue.0).0.lock().unwrap();
-                queue.timeout = true;
-                (receiver.0.queue.0).1.notify_one();
-            }
-            Err(gst::FlowError::CustomError) => {
-                // Flushing, nothing to be done here except for emptying our queue
-                let mut queue = (receiver.0.queue.0).0.lock().unwrap();
-                queue.buffer_queue.clear();
-                (receiver.0.queue.0).1.notify_one();
-            }
-            Err(err) => {
-                gst_error!(receiver.0.cat, obj: &element, "Signalling error");
-                let mut queue = (receiver.0.queue.0).0.lock().unwrap();
-                if queue.error.is_none() {
-                    queue.error = Some(err);
+                Ok(None) if timeout > 0 && timer.elapsed().as_millis() >= timeout as u128 => {
+                    gst_debug!(CAT, obj: &element, "Timed out -- assuming EOS",);
+                    Err(gst::FlowError::Eos)
                 }
-                (receiver.0.queue.0).1.notify_one();
-                break;
+                Ok(None) => {
+                    gst_debug!(CAT, obj: &element, "No frame received yet, retry");
+                    continue;
+                }
+                Ok(Some(Frame::Video(frame))) => {
+                    first_frame = false;
+                    receiver.create_video_buffer_and_info(&element, frame)
+                }
+                Ok(Some(Frame::Audio(frame))) => {
+                    first_frame = false;
+                    receiver.create_audio_buffer_and_info(&element, frame)
+                }
+                Ok(Some(Frame::Metadata(frame))) => {
+                    if let Some(metadata) = frame.metadata() {
+                        gst_debug!(
+                            CAT,
+                            obj: &element,
+                            "Received metadata at timecode {}: {}",
+                            gst::ClockTime::from_nseconds(frame.timecode() as u64 * 100),
+                            metadata,
+                        );
+                    }
+
+                    continue;
+                }
+            };
+
+            match res {
+                Ok(item) => {
+                    let mut queue = (receiver.0.queue.0).0.lock().unwrap();
+                    while queue.buffer_queue.len() > receiver.0.max_queue_length {
+                        gst_warning!(
+                            CAT,
+                            obj: &element,
+                            "Dropping old buffer -- queue has {} items",
+                            queue.buffer_queue.len()
+                        );
+                        queue.buffer_queue.pop_front();
+                    }
+                    queue.buffer_queue.push_back(item);
+                    (receiver.0.queue.0).1.notify_one();
+                    timer = time::Instant::now();
+                }
+                Err(gst::FlowError::Eos) => {
+                    gst_debug!(CAT, obj: &element, "Signalling EOS");
+                    let mut queue = (receiver.0.queue.0).0.lock().unwrap();
+                    queue.timeout = true;
+                    (receiver.0.queue.0).1.notify_one();
+                    break;
+                }
+                Err(gst::FlowError::Flushing) => {
+                    // Flushing, nothing to be done here except for emptying our queue
+                    let mut queue = (receiver.0.queue.0).0.lock().unwrap();
+                    queue.buffer_queue.clear();
+                    (receiver.0.queue.0).1.notify_one();
+                    timer = time::Instant::now();
+                }
+                Err(err) => {
+                    gst_error!(CAT, obj: &element, "Signalling error");
+                    let mut queue = (receiver.0.queue.0).0.lock().unwrap();
+                    if queue.error.is_none() {
+                        queue.error = Some(err);
+                    }
+                    (receiver.0.queue.0).1.notify_one();
+                    break;
+                }
             }
         }
     }
-}
 
-pub trait ReceiverCapture<T: ReceiverType> {
-    fn capture_internal(
-        &self,
-        element: &gst_base::BaseSrc,
-        recv: &RecvInstance,
-    ) -> Result<(gst::Buffer, T::InfoType), gst::FlowError>;
-
-    fn store_internal(info: &mut ReceiverInfo, weak: Weak<ReceiverInner<T>>);
-}
-
-impl ReceiverCapture<VideoReceiver> for Receiver<VideoReceiver> {
-    fn capture_internal(
-        &self,
-        element: &gst_base::BaseSrc,
-        recv: &RecvInstance,
-    ) -> Result<(gst::Buffer, gst_video::VideoInfo), gst::FlowError> {
-        self.capture_video(element, recv)
-    }
-
-    fn store_internal(info: &mut ReceiverInfo, weak: Weak<ReceiverInner<VideoReceiver>>) {
-        assert!(info.video.is_none());
-        info.video = Some(weak);
-    }
-}
-
-impl<T: ReceiverType> Receiver<T> {
     fn calculate_timestamp(
         &self,
         element: &gst_base::BaseSrc,
@@ -796,7 +641,7 @@ impl<T: ReceiverType> Receiver<T> {
         let timecode = gst::ClockTime::from_nseconds(timecode as u64 * 100);
 
         gst_log!(
-            self.0.cat,
+            CAT,
             obj: element,
             "Received frame with timecode {}, timestamp {}, duration {}, receive time {}, local time now {}",
             timecode,
@@ -807,18 +652,16 @@ impl<T: ReceiverType> Receiver<T> {
         );
 
         let (pts, duration) = match self.0.timestamp_mode {
-            TimestampMode::ReceiveTimeTimecode => self.0.observations.process(
-                self.0.cat,
-                element,
-                (Some(timecode), receive_time),
-                duration,
-            ),
-            TimestampMode::ReceiveTimeTimestamp => self.0.observations.process(
-                self.0.cat,
-                element,
-                (timestamp, receive_time),
-                duration,
-            ),
+            TimestampMode::ReceiveTimeTimecode => {
+                self.0
+                    .observations
+                    .process(element, (Some(timecode), receive_time), duration)
+            }
+            TimestampMode::ReceiveTimeTimestamp => {
+                self.0
+                    .observations
+                    .process(element, (timestamp, receive_time), duration)
+            }
             TimestampMode::Timecode => (timecode, duration),
             TimestampMode::Timestamp if timestamp.is_none() => (receive_time, duration),
             TimestampMode::Timestamp => {
@@ -839,7 +682,7 @@ impl<T: ReceiverType> Receiver<T> {
         };
 
         gst_log!(
-            self.0.cat,
+            CAT,
             obj: element,
             "Calculated PTS {}, duration {}",
             pts.display(),
@@ -848,113 +691,28 @@ impl<T: ReceiverType> Receiver<T> {
 
         Some((pts, duration))
     }
-}
 
-impl ReceiverCapture<AudioReceiver> for Receiver<AudioReceiver> {
-    fn capture_internal(
+    fn create_video_buffer_and_info(
         &self,
         element: &gst_base::BaseSrc,
-        recv: &RecvInstance,
-    ) -> Result<(gst::Buffer, gst_audio::AudioInfo), gst::FlowError> {
-        self.capture_audio(element, recv)
-    }
-
-    fn store_internal(info: &mut ReceiverInfo, weak: Weak<ReceiverInner<AudioReceiver>>) {
-        assert!(info.audio.is_none());
-        info.audio = Some(weak);
-    }
-}
-
-impl Receiver<VideoReceiver> {
-    fn capture_video(
-        &self,
-        element: &gst_base::BaseSrc,
-        recv: &RecvInstance,
-    ) -> Result<(gst::Buffer, gst_video::VideoInfo), gst::FlowError> {
-        let timer = time::Instant::now();
-        let timeout = if self.0.first_frame.load(Ordering::SeqCst) {
-            self.0.connect_timeout
-        } else {
-            self.0.timeout
-        };
-        let mut flushing;
-        let mut playing;
-
-        let video_frame = loop {
-            {
-                let queue = (self.0.queue.0).0.lock().unwrap();
-                playing = queue.playing;
-                flushing = queue.flushing;
-                if !queue.capturing {
-                    gst_debug!(self.0.cat, obj: element, "Shutting down");
-                    return Err(gst::FlowError::Flushing);
-                }
-            }
-
-            let res = match recv.capture(true, false, false, 50) {
-                Err(_) => Err(()),
-                Ok(None) => Ok(None),
-                Ok(Some(Frame::Video(frame))) => Ok(Some(frame)),
-                _ => unreachable!(),
-            };
-
-            let video_frame = match res {
-                Err(_) => {
-                    gst::element_error!(
-                        element,
-                        gst::ResourceError::Read,
-                        ["Error receiving frame"]
-                    );
-                    return Err(gst::FlowError::Error);
-                }
-                Ok(None) if timeout > 0 && timer.elapsed().as_millis() >= timeout as u128 => {
-                    gst_debug!(self.0.cat, obj: element, "Timed out -- assuming EOS",);
-                    return Err(gst::FlowError::Eos);
-                }
-                Ok(None) => {
-                    gst_debug!(
-                        self.0.cat,
-                        obj: element,
-                        "No video frame received yet, retry"
-                    );
-                    continue;
-                }
-                Ok(Some(frame)) => frame,
-            };
-
-            break video_frame;
-        };
-
-        self.0.first_frame.store(false, Ordering::SeqCst);
-
-        gst_debug!(
-            self.0.cat,
-            obj: element,
-            "Received video frame {:?}",
-            video_frame,
-        );
+        video_frame: VideoFrame,
+    ) -> Result<Buffer, gst::FlowError> {
+        gst_debug!(CAT, obj: element, "Received video frame {:?}", video_frame);
 
         let (pts, duration) = self
             .calculate_video_timestamp(element, &video_frame)
             .ok_or_else(|| {
-                gst_debug!(self.0.cat, obj: element, "Flushing, dropping buffer");
-                gst::FlowError::CustomError
+                gst_debug!(CAT, obj: element, "Flushing, dropping buffer");
+                gst::FlowError::Flushing
             })?;
-
-        // Simply read all video frames while flushing but don't copy them or anything to
-        // make sure that we're not accumulating anything here
-        if !playing || flushing {
-            gst_debug!(self.0.cat, obj: element, "Flushing, dropping buffer");
-            return Err(gst::FlowError::CustomError);
-        }
 
         let info = self.create_video_info(element, &video_frame)?;
 
         let buffer = self.create_video_buffer(element, pts, duration, &info, &video_frame);
 
-        gst_log!(self.0.cat, obj: element, "Produced buffer {:?}", buffer);
+        gst_log!(CAT, obj: element, "Produced video buffer {:?}", buffer);
 
-        Ok((buffer, info))
+        Ok(Buffer::Video(buffer, info))
     }
 
     fn calculate_video_timestamp(
@@ -1289,98 +1047,28 @@ impl Receiver<VideoReceiver> {
 
         vframe.into_buffer()
     }
-}
 
-impl Receiver<AudioReceiver> {
-    fn capture_audio(
+    fn create_audio_buffer_and_info(
         &self,
         element: &gst_base::BaseSrc,
-        recv: &RecvInstance,
-    ) -> Result<(gst::Buffer, gst_audio::AudioInfo), gst::FlowError> {
-        let timer = time::Instant::now();
-        let timeout = if self.0.first_frame.load(Ordering::SeqCst) {
-            self.0.connect_timeout
-        } else {
-            self.0.timeout
-        };
-        let mut flushing;
-        let mut playing;
-
-        let audio_frame = loop {
-            {
-                let queue = (self.0.queue.0).0.lock().unwrap();
-                flushing = queue.flushing;
-                playing = queue.playing;
-                if !queue.capturing {
-                    gst_debug!(self.0.cat, obj: element, "Shutting down");
-                    return Err(gst::FlowError::Flushing);
-                }
-            }
-
-            let res = match recv.capture(false, true, false, 50) {
-                Err(_) => Err(()),
-                Ok(None) => Ok(None),
-                Ok(Some(Frame::Audio(frame))) => Ok(Some(frame)),
-                _ => unreachable!(),
-            };
-
-            let audio_frame = match res {
-                Err(_) => {
-                    gst::element_error!(
-                        element,
-                        gst::ResourceError::Read,
-                        ["Error receiving frame"]
-                    );
-                    return Err(gst::FlowError::Error);
-                }
-                Ok(None) if timeout > 0 && timer.elapsed().as_millis() >= timeout as u128 => {
-                    gst_debug!(self.0.cat, obj: element, "Timed out -- assuming EOS",);
-                    return Err(gst::FlowError::Eos);
-                }
-                Ok(None) => {
-                    gst_debug!(
-                        self.0.cat,
-                        obj: element,
-                        "No audio frame received yet, retry"
-                    );
-                    continue;
-                }
-                Ok(Some(frame)) => frame,
-            };
-
-            break audio_frame;
-        };
-
-        self.0.first_frame.store(false, Ordering::SeqCst);
-
-        gst_debug!(
-            self.0.cat,
-            obj: element,
-            "Received audio frame {:?}",
-            audio_frame,
-        );
+        audio_frame: AudioFrame,
+    ) -> Result<Buffer, gst::FlowError> {
+        gst_debug!(CAT, obj: element, "Received audio frame {:?}", audio_frame);
 
         let (pts, duration) = self
             .calculate_audio_timestamp(element, &audio_frame)
             .ok_or_else(|| {
-                gst_debug!(self.0.cat, obj: element, "Flushing, dropping buffer");
-                gst::FlowError::CustomError
+                gst_debug!(CAT, obj: element, "Flushing, dropping buffer");
+                gst::FlowError::Flushing
             })?;
-
-        // Simply read all video frames while flushing but don't copy them or anything to
-        // make sure that we're not accumulating anything here
-        if !playing || flushing {
-            gst_debug!(self.0.cat, obj: element, "Flushing, dropping buffer");
-            return Err(gst::FlowError::CustomError);
-        }
 
         let info = self.create_audio_info(element, &audio_frame)?;
 
         let buffer = self.create_audio_buffer(element, pts, duration, &info, &audio_frame);
 
-        gst_log!(self.0.cat, obj: element, "Produced buffer {:?}", buffer);
+        gst_log!(CAT, obj: element, "Produced audio buffer {:?}", buffer);
 
-        Ok((buffer, info))
+        Ok(Buffer::Audio(buffer, info))
     }
 
     fn calculate_audio_timestamp(

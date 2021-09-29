@@ -1,21 +1,21 @@
 mod device_provider;
 pub mod ndi;
-mod ndiaudiosrc;
 #[cfg(feature = "sink")]
 mod ndisink;
 #[cfg(feature = "sink")]
 mod ndisinkcombiner;
 #[cfg(feature = "sink")]
 pub mod ndisinkmeta;
+mod ndisrc;
+mod ndisrcdemux;
+pub mod ndisrcmeta;
 pub mod ndisys;
-mod ndivideosrc;
 pub mod receiver;
 
 use crate::ndi::*;
 use crate::ndisys::*;
 use crate::receiver::*;
 
-use std::collections::HashMap;
 use std::time;
 
 use once_cell::sync::Lazy;
@@ -41,8 +41,9 @@ fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
 
     device_provider::register(plugin)?;
 
-    ndivideosrc::register(plugin)?;
-    ndiaudiosrc::register(plugin)?;
+    ndisrc::register(plugin)?;
+    ndisrcdemux::register(plugin)?;
+
     #[cfg(feature = "sink")]
     {
         ndisinkcombiner::register(plugin)?;

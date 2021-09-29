@@ -10,15 +10,23 @@ use std::{i32, u32};
 
 use once_cell::sync::Lazy;
 
-use crate::connect_ndi;
 use crate::ndisys;
 
-use crate::AudioReceiver;
+use crate::ndisrcmeta;
+use crate::Buffer;
 use crate::Receiver;
 use crate::ReceiverControlHandle;
 use crate::ReceiverItem;
 use crate::TimestampMode;
 use crate::DEFAULT_RECEIVER_NDI_NAME;
+
+static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
+    gst::DebugCategory::new(
+        "ndisrc",
+        gst::DebugColorFlags::empty(),
+        Some("NewTek NDI Source"),
+    )
+});
 
 #[derive(Debug, Clone)]
 struct Settings {
@@ -40,7 +48,7 @@ impl Default for Settings {
             receiver_ndi_name: DEFAULT_RECEIVER_NDI_NAME.clone(),
             connect_timeout: 10000,
             timeout: 5000,
-            max_queue_length: 5,
+            max_queue_length: 10,
             bandwidth: ndisys::NDIlib_recv_bandwidth_highest,
             timestamp_mode: TimestampMode::ReceiveTimeTimecode,
         }
@@ -48,41 +56,41 @@ impl Default for Settings {
 }
 
 struct State {
-    info: Option<gst_audio::AudioInfo>,
-    receiver: Option<Receiver<AudioReceiver>>,
+    video_info: Option<gst_video::VideoInfo>,
+    video_caps: Option<gst::Caps>,
+    audio_info: Option<gst_audio::AudioInfo>,
+    audio_caps: Option<gst::Caps>,
     current_latency: Option<gst::ClockTime>,
+    receiver: Option<Receiver>,
 }
 
 impl Default for State {
     fn default() -> State {
         State {
-            info: None,
-            receiver: None,
+            video_info: None,
+            video_caps: None,
+            audio_info: None,
+            audio_caps: None,
             current_latency: gst::ClockTime::NONE,
+            receiver: None,
         }
     }
 }
 
-pub struct NdiAudioSrc {
-    cat: gst::DebugCategory,
+pub struct NdiSrc {
     settings: Mutex<Settings>,
     state: Mutex<State>,
-    receiver_controller: Mutex<Option<ReceiverControlHandle<AudioReceiver>>>,
+    receiver_controller: Mutex<Option<ReceiverControlHandle>>,
 }
 
 #[glib::object_subclass]
-impl ObjectSubclass for NdiAudioSrc {
-    const NAME: &'static str = "NdiAudioSrc";
-    type Type = super::NdiAudioSrc;
+impl ObjectSubclass for NdiSrc {
+    const NAME: &'static str = "NdiSrc";
+    type Type = super::NdiSrc;
     type ParentType = gst_base::BaseSrc;
 
     fn new() -> Self {
         Self {
-            cat: gst::DebugCategory::new(
-                "ndiaudiosrc",
-                gst::DebugColorFlags::empty(),
-                Some("NewTek NDI Audio Source"),
-            ),
             settings: Mutex::new(Default::default()),
             state: Mutex::new(Default::default()),
             receiver_controller: Mutex::new(None),
@@ -90,7 +98,7 @@ impl ObjectSubclass for NdiAudioSrc {
     }
 }
 
-impl ObjectImpl for NdiAudioSrc {
+impl ObjectImpl for NdiSrc {
     fn properties() -> &'static [glib::ParamSpec] {
         static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
             vec![
@@ -139,7 +147,7 @@ impl ObjectImpl for NdiAudioSrc {
                     "Maximum receive queue length",
                     0,
                     u32::MAX,
-                    5,
+                    10,
                     glib::ParamFlags::READWRITE,
                 ),
                 glib::ParamSpec::new_int(
@@ -186,7 +194,7 @@ impl ObjectImpl for NdiAudioSrc {
                 let mut settings = self.settings.lock().unwrap();
                 let ndi_name = value.get().unwrap();
                 gst_debug!(
-                    self.cat,
+                    CAT,
                     obj: obj,
                     "Changing ndi-name from {:?} to {:?}",
                     settings.ndi_name,
@@ -198,7 +206,7 @@ impl ObjectImpl for NdiAudioSrc {
                 let mut settings = self.settings.lock().unwrap();
                 let url_address = value.get().unwrap();
                 gst_debug!(
-                    self.cat,
+                    CAT,
                     obj: obj,
                     "Changing url-address from {:?} to {:?}",
                     settings.url_address,
@@ -210,7 +218,7 @@ impl ObjectImpl for NdiAudioSrc {
                 let mut settings = self.settings.lock().unwrap();
                 let receiver_ndi_name = value.get::<Option<String>>().unwrap();
                 gst_debug!(
-                    self.cat,
+                    CAT,
                     obj: obj,
                     "Changing receiver-ndi-name from {:?} to {:?}",
                     settings.receiver_ndi_name,
@@ -223,7 +231,7 @@ impl ObjectImpl for NdiAudioSrc {
                 let mut settings = self.settings.lock().unwrap();
                 let connect_timeout = value.get().unwrap();
                 gst_debug!(
-                    self.cat,
+                    CAT,
                     obj: obj,
                     "Changing connect-timeout from {} to {}",
                     settings.connect_timeout,
@@ -235,7 +243,7 @@ impl ObjectImpl for NdiAudioSrc {
                 let mut settings = self.settings.lock().unwrap();
                 let timeout = value.get().unwrap();
                 gst_debug!(
-                    self.cat,
+                    CAT,
                     obj: obj,
                     "Changing timeout from {} to {}",
                     settings.timeout,
@@ -247,7 +255,7 @@ impl ObjectImpl for NdiAudioSrc {
                 let mut settings = self.settings.lock().unwrap();
                 let max_queue_length = value.get().unwrap();
                 gst_debug!(
-                    self.cat,
+                    CAT,
                     obj: obj,
                     "Changing max-queue-length from {} to {}",
                     settings.max_queue_length,
@@ -259,7 +267,7 @@ impl ObjectImpl for NdiAudioSrc {
                 let mut settings = self.settings.lock().unwrap();
                 let bandwidth = value.get().unwrap();
                 gst_debug!(
-                    self.cat,
+                    CAT,
                     obj: obj,
                     "Changing bandwidth from {} to {}",
                     settings.bandwidth,
@@ -271,7 +279,7 @@ impl ObjectImpl for NdiAudioSrc {
                 let mut settings = self.settings.lock().unwrap();
                 let timestamp_mode = value.get().unwrap();
                 gst_debug!(
-                    self.cat,
+                    CAT,
                     obj: obj,
                     "Changing timestamp mode from {:?} to {:?}",
                     settings.timestamp_mode,
@@ -325,13 +333,13 @@ impl ObjectImpl for NdiAudioSrc {
     }
 }
 
-impl ElementImpl for NdiAudioSrc {
+impl ElementImpl for NdiSrc {
     fn metadata() -> Option<&'static gst::subclass::ElementMetadata> {
         static ELEMENT_METADATA: Lazy<gst::subclass::ElementMetadata> = Lazy::new(|| {
             gst::subclass::ElementMetadata::new(
-            "NewTek NDI Audio Source",
-            "Source",
-            "NewTek NDI audio source",
+            "NewTek NDI Source",
+            "Source/Audio/Video/Network",
+            "NewTek NDI source",
             "Ruben Gonzalez <rubenrua@teltek.es>, Daniel Vilar <daniel.peiteado@teltek.es>, Sebastian Dröge <sebastian@centricular.com>",
             )
         });
@@ -341,28 +349,15 @@ impl ElementImpl for NdiAudioSrc {
 
     fn pad_templates() -> &'static [gst::PadTemplate] {
         static PAD_TEMPLATES: Lazy<Vec<gst::PadTemplate>> = Lazy::new(|| {
-            let caps = gst::Caps::new_simple(
-                "audio/x-raw",
-                &[
-                    (
-                        "format",
-                        &gst::List::new(&[&gst_audio::AUDIO_FORMAT_S16.to_string()]),
-                    ),
-                    ("rate", &gst::IntRange::<i32>::new(1, i32::MAX)),
-                    ("channels", &gst::IntRange::<i32>::new(1, i32::MAX)),
-                    ("layout", &"interleaved"),
-                ],
-            );
-
-            let audio_src_pad_template = gst::PadTemplate::new(
+            let src_pad_template = gst::PadTemplate::new(
                 "src",
                 gst::PadDirection::Src,
-                gst::PadPresence::Sometimes,
-                &caps,
+                gst::PadPresence::Always,
+                &gst::Caps::builder("application/x-ndi").build(),
             )
             .unwrap();
 
-            vec![audio_src_pad_template]
+            vec![src_pad_template]
         });
 
         PAD_TEMPLATES.as_ref()
@@ -396,15 +391,15 @@ impl ElementImpl for NdiAudioSrc {
     }
 }
 
-impl BaseSrcImpl for NdiAudioSrc {
-    fn negotiate(&self, _element: &Self::Type) -> Result<(), gst::LoggableError> {
-        // Always succeed here without doing anything: we will set the caps once we received a
-        // buffer, there's nothing we can negotiate
-        Ok(())
+impl BaseSrcImpl for NdiSrc {
+    fn negotiate(&self, element: &Self::Type) -> Result<(), gst::LoggableError> {
+        element
+            .set_caps(&gst::Caps::builder("application/x-ndi").build())
+            .map_err(|_| gst::loggable_error!(CAT, "Failed to negotiate caps",))
     }
 
     fn unlock(&self, element: &Self::Type) -> Result<(), gst::ErrorMessage> {
-        gst_debug!(self.cat, obj: element, "Unlocking",);
+        gst_debug!(CAT, obj: element, "Unlocking",);
         if let Some(ref controller) = *self.receiver_controller.lock().unwrap() {
             controller.set_flushing(true);
         }
@@ -412,7 +407,7 @@ impl BaseSrcImpl for NdiAudioSrc {
     }
 
     fn unlock_stop(&self, element: &Self::Type) -> Result<(), gst::ErrorMessage> {
-        gst_debug!(self.cat, obj: element, "Stop unlocking",);
+        gst_debug!(CAT, obj: element, "Stop unlocking",);
         if let Some(ref controller) = *self.receiver_controller.lock().unwrap() {
             controller.set_flushing(false);
         }
@@ -430,8 +425,7 @@ impl BaseSrcImpl for NdiAudioSrc {
             ));
         }
 
-        let receiver = connect_ndi(
-            self.cat,
+        let receiver = Receiver::connect(
             element.upcast_ref(),
             settings.ndi_name.as_deref(),
             settings.url_address.as_deref(),
@@ -443,7 +437,6 @@ impl BaseSrcImpl for NdiAudioSrc {
             settings.max_queue_length as usize,
         );
 
-        // settings.id_receiver exists
         match receiver {
             None => Err(gst::error_msg!(
                 gst::ResourceError::NotFound,
@@ -488,10 +481,10 @@ impl BaseSrcImpl for NdiAudioSrc {
                         gst::ClockTime::ZERO
                     };
 
-                    let max = 5 * latency;
+                    let max = settings.max_queue_length as u64 * latency;
 
                     gst_debug!(
-                        self.cat,
+                        CAT,
                         obj: element,
                         "Returning latency min {} max {}",
                         min,
@@ -507,18 +500,6 @@ impl BaseSrcImpl for NdiAudioSrc {
         }
     }
 
-    fn fixate(&self, element: &Self::Type, mut caps: gst::Caps) -> gst::Caps {
-        caps.truncate();
-        {
-            let caps = caps.make_mut();
-            let s = caps.structure_mut(0).unwrap();
-            s.fixate_field_nearest_int("rate", 48_000);
-            s.fixate_field_nearest_int("channels", 2);
-        }
-
-        self.parent_fixate(element, caps)
-    }
-
     fn create(
         &self,
         element: &Self::Type,
@@ -531,46 +512,87 @@ impl BaseSrcImpl for NdiAudioSrc {
             match state.receiver.take() {
                 Some(recv) => recv,
                 None => {
-                    gst_error!(self.cat, obj: element, "Have no receiver");
+                    gst_error!(CAT, obj: element, "Have no receiver");
                     return Err(gst::FlowError::Error);
                 }
             }
         };
 
-        match recv.capture() {
-            ReceiverItem::Buffer(buffer, info) => {
-                let mut state = self.state.lock().unwrap();
-                state.receiver = Some(recv);
-                if state.info.as_ref() != Some(&info) {
-                    let caps = info.to_caps().map_err(|_| {
-                        gst::element_error!(
-                            element,
-                            gst::ResourceError::Settings,
-                            ["Invalid audio info received: {:?}", info]
-                        );
-                        gst::FlowError::NotNegotiated
-                    })?;
-                    state.info = Some(info);
-                    state.current_latency = buffer.duration();
-                    drop(state);
-                    gst_debug!(self.cat, obj: element, "Configuring for caps {}", caps);
-                    element.set_caps(&caps).map_err(|_| {
-                        gst::element_error!(
-                            element,
-                            gst::CoreError::Negotiation,
-                            ["Failed to negotiate caps: {:?}", caps]
-                        );
-                        gst::FlowError::NotNegotiated
-                    })?;
+        let res = recv.capture();
 
-                    let _ =
-                        element.post_message(gst::message::Latency::builder().src(element).build());
-                }
+        let mut state = self.state.lock().unwrap();
+        state.receiver = Some(recv);
+
+        match res {
+            ReceiverItem::Buffer(buffer) => {
+                let buffer = match buffer {
+                    Buffer::Audio(mut buffer, info) => {
+                        if state.audio_info.as_ref() != Some(&info) {
+                            let caps = info.to_caps().map_err(|_| {
+                                gst::element_error!(
+                                    element,
+                                    gst::ResourceError::Settings,
+                                    ["Invalid audio info received: {:?}", info]
+                                );
+                                gst::FlowError::NotNegotiated
+                            })?;
+                            state.audio_info = Some(info);
+                            state.audio_caps = Some(caps);
+                        }
+
+                        {
+                            let buffer = buffer.get_mut().unwrap();
+                            ndisrcmeta::NdiSrcMeta::add(
+                                buffer,
+                                ndisrcmeta::StreamType::Audio,
+                                state.audio_caps.as_ref().unwrap(),
+                            );
+                        }
+
+                        buffer
+                    }
+                    Buffer::Video(mut buffer, info) => {
+                        let mut latency_changed = false;
+
+                        if state.video_info.as_ref() != Some(&info) {
+                            let caps = info.to_caps().map_err(|_| {
+                                gst::element_error!(
+                                    element,
+                                    gst::ResourceError::Settings,
+                                    ["Invalid audio info received: {:?}", info]
+                                );
+                                gst::FlowError::NotNegotiated
+                            })?;
+                            state.video_info = Some(info);
+                            state.video_caps = Some(caps);
+                            latency_changed = state.current_latency != buffer.duration();
+                            state.current_latency = buffer.duration();
+                        }
+
+                        {
+                            let buffer = buffer.get_mut().unwrap();
+                            ndisrcmeta::NdiSrcMeta::add(
+                                buffer,
+                                ndisrcmeta::StreamType::Video,
+                                state.video_caps.as_ref().unwrap(),
+                            );
+                        }
+
+                        drop(state);
+                        if latency_changed {
+                            let _ = element.post_message(
+                                gst::message::Latency::builder().src(element).build(),
+                            );
+                        }
+
+                        buffer
+                    }
+                };
 
                 Ok(CreateSuccess::NewBuffer(buffer))
             }
-            ReceiverItem::Flushing => Err(gst::FlowError::Flushing),
             ReceiverItem::Timeout => Err(gst::FlowError::Eos),
+            ReceiverItem::Flushing => Err(gst::FlowError::Flushing),
             ReceiverItem::Error(err) => Err(err),
         }
     }

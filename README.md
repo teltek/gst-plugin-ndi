@@ -12,16 +12,14 @@ Some examples of how to use these elements from the command line:
 ```
 #Information about the elements
 gst-inspect-1.0 ndi
-gst-inspect-1.0 ndivideosrc
-gst-inspect-1.0 ndiaudiosrc
+gst-inspect-1.0 ndisrc
+gst-inspect-1.0 ndisink
 
-#Video pipeline
-gst-launch-1.0 ndivideosrc ndi-name="GC-DEV2 (OBS)" ! autovideosink
-#Audio pipeline
-gst-launch-1.0 ndiaudiosrc ndi-name="GC-DEV2 (OBS)" ! autoaudiosink
+# Audio/Video source pipeline
+gst-launch-1.0 ndisrc ndi-name="GC-DEV2 (OBS)" ! ndisrcdemux name=demux   demux.video ! queue ! videoconvert ! autovideosink  demux.audio ! queue ! audioconvert ! autoaudiosink
 
-#Video and audio pipeline
-gst-launch-1.0 ndivideosrc ndi-name="GC-DEV2 (OBS)" ! autovideosink ndiaudiosrc ndi-name="GC-DEV2 (OBS)" ! autoaudiosink
+# Audio/Video sink pipeline
+gst-launch-1.0 videotestsrc is-live=true ! video/x-raw,format=UYVY ! ndisinkcombiner name=combiner ! ndisink ndi-name="My NDI source"  audiotestsrc is-live=true ! combiner.audio
 ```
 
 Feel free to contribute to this project. Some ways you can contribute are:
