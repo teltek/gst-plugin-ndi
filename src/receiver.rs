@@ -624,13 +624,7 @@ impl Receiver {
         timecode: i64,
         duration: Option<gst::ClockTime>,
     ) -> Option<(gst::ClockTime, Option<gst::ClockTime>)> {
-        let clock = element.clock()?;
-
-        // For now take the current running time as PTS. At a later time we
-        // will want to work with the timestamp given by the NDI SDK if available
-        let now = clock.time()?;
-        let base_time = element.base_time()?;
-        let receive_time = now - base_time;
+        let receive_time = element.current_running_time()?;
 
         let real_time_now = gst::ClockTime::from_nseconds(glib::real_time() as u64 * 1000);
         let timestamp = if timestamp == ndisys::NDIlib_recv_timestamp_undefined {
