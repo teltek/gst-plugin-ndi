@@ -125,9 +125,9 @@ impl Observations {
         element: &gst_base::BaseSrc,
         time: (Option<gst::ClockTime>, gst::ClockTime),
         duration: Option<gst::ClockTime>,
-    ) -> (gst::ClockTime, Option<gst::ClockTime>) {
+    ) -> (gst::ClockTime, Option<gst::ClockTime>, bool) {
         if time.0.is_none() {
-            return (time.1, duration);
+            return (time.1, duration, false);
         }
 
         let time = (time.0.unwrap(), time.1);
@@ -158,7 +158,7 @@ impl Observations {
                     inner.base_remote_time = Some(remote_time);
                     inner.base_local_time = Some(local_time);
 
-                    return (gst::ClockTime::from_nseconds(local_time), duration);
+                    return (gst::ClockTime::from_nseconds(local_time), duration, true);
                 }
             };
 
@@ -184,7 +184,10 @@ impl Observations {
                     "Too small/big slope {}, resetting",
                     slope
                 );
+
+                let discont = !inner.deltas.is_empty();
                 *inner = ObservationsInner::default();
+
                 gst_debug!(
                     CAT,
                     obj: element,
@@ -195,7 +198,7 @@ impl Observations {
                 inner.base_remote_time = Some(remote_time);
                 inner.base_local_time = Some(local_time);
 
-                return (gst::ClockTime::from_nseconds(local_time), duration);
+                return (gst::ClockTime::from_nseconds(local_time), duration, discont);
             }
         }
 
@@ -209,7 +212,10 @@ impl Observations {
                 delta,
                 inner.skew
             );
+
+            let discont = !inner.deltas.is_empty();
             *inner = ObservationsInner::default();
+
             gst_debug!(
                 CAT,
                 obj: element,
@@ -220,7 +226,7 @@ impl Observations {
             inner.base_remote_time = Some(remote_time);
             inner.base_local_time = Some(local_time);
 
-            return (gst::ClockTime::from_nseconds(local_time), duration);
+            return (gst::ClockTime::from_nseconds(local_time), duration, discont);
         }
 
         if inner.filling {
@@ -276,7 +282,7 @@ impl Observations {
             gst::ClockTime::from_nseconds(out_time)
         );
 
-        (gst::ClockTime::from_nseconds(out_time), duration)
+        (gst::ClockTime::from_nseconds(out_time), duration, false)
     }
 }
 
@@ -645,7 +651,7 @@ impl Receiver {
         timestamp: i64,
         timecode: i64,
         duration: Option<gst::ClockTime>,
-    ) -> Option<(gst::ClockTime, Option<gst::ClockTime>)> {
+    ) -> Option<(gst::ClockTime, Option<gst::ClockTime>, bool)> {
         let receive_time = element.current_running_time()?;
 
         let real_time_now = gst::ClockTime::from_nseconds(glib::real_time() as u64 * 1000);
@@ -667,7 +673,7 @@ impl Receiver {
             real_time_now,
         );
 
-        let (pts, duration) = match self.0.timestamp_mode {
+        let (pts, duration, discont) = match self.0.timestamp_mode {
             TimestampMode::ReceiveTimeTimecode => {
                 self.0
                     .observations
@@ -678,24 +684,24 @@ impl Receiver {
                     .observations
                     .process(element, (timestamp, receive_time), duration)
             }
-            TimestampMode::Timecode => (timecode, duration),
-            TimestampMode::Timestamp if timestamp.is_none() => (receive_time, duration),
+            TimestampMode::Timecode => (timecode, duration, false),
+            TimestampMode::Timestamp if timestamp.is_none() => (receive_time, duration, false),
             TimestampMode::Timestamp => {
                 // Timestamps are relative to the UNIX epoch
                 let timestamp = timestamp?;
                 if real_time_now > timestamp {
                     let diff = real_time_now - timestamp;
                     if diff > receive_time {
-                        (gst::ClockTime::ZERO, duration)
+                        (gst::ClockTime::ZERO, duration, false)
                     } else {
-                        (receive_time - diff, duration)
+                        (receive_time - diff, duration, false)
                     }
                 } else {
                     let diff = timestamp - real_time_now;
-                    (receive_time + diff, duration)
+                    (receive_time + diff, duration, false)
                 }
             }
-            TimestampMode::ReceiveTime => (receive_time, duration),
+            TimestampMode::ReceiveTime => (receive_time, duration, false),
         };
 
         gst_log!(
@@ -706,7 +712,7 @@ impl Receiver {
             duration.display(),
         );
 
-        Some((pts, duration))
+        Some((pts, duration, discont))
     }
 
     fn create_video_buffer_and_info(
@@ -716,7 +722,7 @@ impl Receiver {
     ) -> Result<Buffer, gst::FlowError> {
         gst_debug!(CAT, obj: element, "Received video frame {:?}", video_frame);
 
-        let (pts, duration) = self
+        let (pts, duration, discont) = self
             .calculate_video_timestamp(element, &video_frame)
             .ok_or_else(|| {
                 gst_debug!(CAT, obj: element, "Flushing, dropping buffer");
@@ -725,7 +731,13 @@ impl Receiver {
 
         let info = self.create_video_info(element, &video_frame)?;
 
-        let buffer = self.create_video_buffer(element, pts, duration, &info, &video_frame);
+        let mut buffer = self.create_video_buffer(element, pts, duration, &info, &video_frame);
+        if discont {
+            buffer
+                .get_mut()
+                .unwrap()
+                .set_flags(gst::BufferFlags::RESYNC);
+        }
 
         gst_log!(CAT, obj: element, "Produced video buffer {:?}", buffer);
 
@@ -736,7 +748,7 @@ impl Receiver {
         &self,
         element: &gst_base::BaseSrc,
         video_frame: &VideoFrame,
-    ) -> Option<(gst::ClockTime, Option<gst::ClockTime>)> {
+    ) -> Option<(gst::ClockTime, Option<gst::ClockTime>, bool)> {
         let duration = gst::ClockTime::SECOND.mul_div_floor(
             video_frame.frame_rate().1 as u64,
             video_frame.frame_rate().0 as u64,
@@ -1072,7 +1084,7 @@ impl Receiver {
     ) -> Result<Buffer, gst::FlowError> {
         gst_debug!(CAT, obj: element, "Received audio frame {:?}", audio_frame);
 
-        let (pts, duration) = self
+        let (pts, duration, discont) = self
             .calculate_audio_timestamp(element, &audio_frame)
             .ok_or_else(|| {
                 gst_debug!(CAT, obj: element, "Flushing, dropping buffer");
@@ -1081,7 +1093,13 @@ impl Receiver {
 
         let info = self.create_audio_info(element, &audio_frame)?;
 
-        let buffer = self.create_audio_buffer(element, pts, duration, &info, &audio_frame);
+        let mut buffer = self.create_audio_buffer(element, pts, duration, &info, &audio_frame);
+        if discont {
+            buffer
+                .get_mut()
+                .unwrap()
+                .set_flags(gst::BufferFlags::RESYNC);
+        }
 
         gst_log!(CAT, obj: element, "Produced audio buffer {:?}", buffer);
 
@@ -1092,7 +1110,7 @@ impl Receiver {
         &self,
         element: &gst_base::BaseSrc,
         audio_frame: &AudioFrame,
-    ) -> Option<(gst::ClockTime, Option<gst::ClockTime>)> {
+    ) -> Option<(gst::ClockTime, Option<gst::ClockTime>, bool)> {
         let duration = gst::ClockTime::SECOND.mul_div_floor(
             audio_frame.no_samples() as u64,
             audio_frame.sample_rate() as u64,
