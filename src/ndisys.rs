@@ -122,18 +122,25 @@ pub enum NDIlib_recv_color_format_e {
     NDIlib_recv_color_format_best = 101,
 }
 
+const fn make_fourcc(fourcc: &[u8; 4]) -> u32 {
+    ((fourcc[0] as u32) << 0)
+        | ((fourcc[1] as u32) << 8)
+        | ((fourcc[2] as u32) << 16)
+        | ((fourcc[3] as u32) << 24)
+}
+
 pub type NDIlib_FourCC_video_type_e = u32;
-pub const NDIlib_FourCC_video_type_UYVY: NDIlib_FourCC_video_type_e = 0x59_56_59_55;
-pub const NDIlib_FourCC_video_type_UYVA: NDIlib_FourCC_video_type_e = 0x41_56_56_55;
-pub const NDIlib_FourCC_video_type_P216: NDIlib_FourCC_video_type_e = 0x36_31_32_50;
-pub const NDIlib_FourCC_video_type_PA16: NDIlib_FourCC_video_type_e = 0x36_31_41_50;
-pub const NDIlib_FourCC_video_type_YV12: NDIlib_FourCC_video_type_e = 0x32_31_56_59;
-pub const NDIlib_FourCC_video_type_I420: NDIlib_FourCC_video_type_e = 0x30_32_34_49;
-pub const NDIlib_FourCC_video_type_NV12: NDIlib_FourCC_video_type_e = 0x32_31_56_4e;
-pub const NDIlib_FourCC_video_type_BGRA: NDIlib_FourCC_video_type_e = 0x41_52_47_42;
-pub const NDIlib_FourCC_video_type_BGRX: NDIlib_FourCC_video_type_e = 0x58_52_47_42;
-pub const NDIlib_FourCC_video_type_RGBA: NDIlib_FourCC_video_type_e = 0x41_42_47_52;
-pub const NDIlib_FourCC_video_type_RGBX: NDIlib_FourCC_video_type_e = 0x58_42_47_52;
+pub const NDIlib_FourCC_video_type_UYVY: NDIlib_FourCC_video_type_e = make_fourcc(b"UYVY");
+pub const NDIlib_FourCC_video_type_UYVA: NDIlib_FourCC_video_type_e = make_fourcc(b"UYVA");
+pub const NDIlib_FourCC_video_type_P216: NDIlib_FourCC_video_type_e = make_fourcc(b"P216");
+pub const NDIlib_FourCC_video_type_PA16: NDIlib_FourCC_video_type_e = make_fourcc(b"PA16");
+pub const NDIlib_FourCC_video_type_YV12: NDIlib_FourCC_video_type_e = make_fourcc(b"YV12");
+pub const NDIlib_FourCC_video_type_I420: NDIlib_FourCC_video_type_e = make_fourcc(b"I420");
+pub const NDIlib_FourCC_video_type_NV12: NDIlib_FourCC_video_type_e = make_fourcc(b"NV12");
+pub const NDIlib_FourCC_video_type_BGRA: NDIlib_FourCC_video_type_e = make_fourcc(b"BGRA");
+pub const NDIlib_FourCC_video_type_BGRX: NDIlib_FourCC_video_type_e = make_fourcc(b"BGRX");
+pub const NDIlib_FourCC_video_type_RGBA: NDIlib_FourCC_video_type_e = make_fourcc(b"RGBA");
+pub const NDIlib_FourCC_video_type_RGBX: NDIlib_FourCC_video_type_e = make_fourcc(b"RGBX");
 
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
