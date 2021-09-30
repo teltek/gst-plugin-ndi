@@ -12,9 +12,16 @@ use once_cell::sync::Lazy;
 
 use crate::ndi;
 
+static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
+    gst::DebugCategory::new(
+        "ndideviceprovider",
+        gst::DebugColorFlags::empty(),
+        Some("NewTek NDI Device Provider"),
+    )
+});
+
 #[derive(Debug)]
 pub struct DeviceProvider {
-    cat: gst::DebugCategory,
     thread: Mutex<Option<thread::JoinHandle<()>>>,
     current_devices: Mutex<Vec<super::Device>>,
     find: Mutex<Option<ndi::FindInstance>>,
@@ -29,11 +36,6 @@ impl ObjectSubclass for DeviceProvider {
 
     fn new() -> Self {
         Self {
-            cat: gst::DebugCategory::new(
-                "ndideviceprovider",
-                gst::DebugColorFlags::empty(),
-                Some("NewTek NDI Device Provider"),
-            ),
             thread: Mutex::new(None),
             current_devices: Mutex::new(vec![]),
             find: Mutex::new(None),
@@ -68,11 +70,7 @@ impl DeviceProviderImpl for DeviceProvider {
     fn start(&self, device_provider: &Self::Type) -> Result<(), gst::LoggableError> {
         let mut thread_guard = self.thread.lock().unwrap();
         if thread_guard.is_some() {
-            gst_log!(
-                self.cat,
-                obj: device_provider,
-                "Device provider already started"
-            );
+            gst_log!(CAT, obj: device_provider, "Device provider already started");
             return Ok(());
         }
 
@@ -90,17 +88,13 @@ impl DeviceProviderImpl for DeviceProvider {
             {
                 let mut find_guard = imp.find.lock().unwrap();
                 if find_guard.is_some() {
-                    gst_log!(imp.cat, obj: &device_provider, "Already started");
+                    gst_log!(CAT, obj: &device_provider, "Already started");
                     return;
                 }
 
                 let find = match ndi::FindInstance::builder().build() {
                     None => {
-                        gst_error!(
-                            imp.cat,
-                            obj: &device_provider,
-                            "Failed to create Find instance"
-                        );
+                        gst_error!(CAT, obj: &device_provider, "Failed to create Find instance");
                         return;
                     }
                     Some(find) => find,
@@ -144,7 +138,7 @@ impl DeviceProvider {
         };
 
         if !find.wait_for_sources(if first { 1000 } else { 5000 }) {
-            gst_trace!(self.cat, obj: device_provider, "No new sources found");
+            gst_trace!(CAT, obj: device_provider, "No new sources found");
             return;
         }
 
@@ -160,9 +154,9 @@ impl DeviceProvider {
             let old_device_imp = Device::from_instance(old_device);
             let old_source = old_device_imp.source.get().unwrap();
 
-            if !sources.contains(&old_source.0) {
+            if !sources.contains(&*old_source) {
                 gst_log!(
-                    self.cat,
+                    CAT,
                     obj: device_provider,
                     "Source {:?} disappeared",
                     old_source
@@ -171,7 +165,7 @@ impl DeviceProvider {
             } else {
                 // Otherwise remember that we had it before already and don't have to announce it
                 // again. After the loop we're going to remove these all from the sources vec.
-                remaining_sources.push(old_source.0.to_owned());
+                remaining_sources.push(old_source.to_owned());
             }
         }
 
@@ -188,18 +182,8 @@ impl DeviceProvider {
 
         // Now go through all new devices and announce them
         for source in sources {
-            gst_log!(
-                self.cat,
-                obj: device_provider,
-                "Source {:?} appeared",
-                source
-            );
-            // Add once for audio, another time for video
-            let device = super::Device::new(&source, true);
-            device_provider.device_add(&device);
-            current_devices_guard.push(device);
-
-            let device = super::Device::new(&source, false);
+            gst_log!(CAT, obj: device_provider, "Source {:?} appeared", source);
+            let device = super::Device::new(&source);
             device_provider.device_add(&device);
             current_devices_guard.push(device);
         }
@@ -208,8 +192,7 @@ impl DeviceProvider {
 
 #[derive(Debug)]
 pub struct Device {
-    cat: gst::DebugCategory,
-    source: OnceCell<(ndi::Source<'static>, glib::Type)>,
+    source: OnceCell<ndi::Source<'static>>,
 }
 
 #[glib::object_subclass]
@@ -220,11 +203,6 @@ impl ObjectSubclass for Device {
 
     fn new() -> Self {
         Self {
-            cat: gst::DebugCategory::new(
-                "ndidevice",
-                gst::DebugColorFlags::empty(),
-                Some("NewTek NDI Device"),
-            ),
             source: OnceCell::new(),
         }
     }
@@ -240,11 +218,11 @@ impl DeviceImpl for Device {
     ) -> Result<gst::Element, gst::LoggableError> {
         let source_info = self.source.get().unwrap();
         let element = glib::Object::with_type(
-            source_info.1,
+            crate::ndisrc::NdiSrc::static_type(),
             &[
                 ("name", &name),
-                ("ndi-name", &source_info.0.ndi_name()),
-                ("url-address", &source_info.0.url_address()),
+                ("ndi-name", &source_info.ndi_name()),
+                ("url-address", &source_info.url_address()),
             ],
         )
         .unwrap()
@@ -256,24 +234,12 @@ impl DeviceImpl for Device {
 }
 
 impl super::Device {
-    fn new(source: &ndi::Source<'_>, is_audio: bool) -> super::Device {
-        let display_name = format!(
-            "{} ({})",
-            source.ndi_name(),
-            if is_audio { "Audio" } else { "Video" }
-        );
-        let device_class = format!(
-            "Source/{}/Network",
-            if is_audio { "Audio" } else { "Video" }
-        );
+    fn new(source: &ndi::Source<'_>) -> super::Device {
+        let display_name = source.ndi_name();
+        let device_class = "Source/Audio/Video/Network";
 
-        // Get the caps from the template caps of the corresponding source element
-        let element_type = if is_audio {
-            crate::ndiaudiosrc::NdiAudioSrc::static_type()
-        } else {
-            crate::ndivideosrc::NdiVideoSrc::static_type()
-        };
-        let element_class = glib::Class::<gst::Element>::from_type(element_type).unwrap();
+        let element_class =
+            glib::Class::<gst::Element>::from_type(crate::ndisrc::NdiSrc::static_type()).unwrap();
         let templ = element_class.pad_template("src").unwrap();
         let caps = templ.caps();
 
@@ -292,10 +258,7 @@ impl super::Device {
         .unwrap();
         let device_impl = Device::from_instance(&device);
 
-        device_impl
-            .source
-            .set((source.to_owned(), element_type))
-            .unwrap();
+        device_impl.source.set(source.to_owned()).unwrap();
 
         device
     }
