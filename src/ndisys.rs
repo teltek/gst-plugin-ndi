@@ -111,16 +111,13 @@ pub const NDIlib_recv_bandwidth_audio_only: NDIlib_recv_bandwidth_e = 10;
 pub const NDIlib_recv_bandwidth_lowest: NDIlib_recv_bandwidth_e = 0;
 pub const NDIlib_recv_bandwidth_highest: NDIlib_recv_bandwidth_e = 100;
 
-#[repr(u32)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum NDIlib_recv_color_format_e {
-    NDIlib_recv_color_format_BGRX_BGRA = 0,
-    NDIlib_recv_color_format_UYVY_BGRA = 1,
-    NDIlib_recv_color_format_RGBX_RGBA = 2,
-    NDIlib_recv_color_format_UYVY_RGBA = 3,
-    NDIlib_recv_color_format_fastest = 100,
-    NDIlib_recv_color_format_best = 101,
-}
+pub type NDIlib_recv_color_format_e = u32;
+pub const NDIlib_recv_color_format_BGRX_BGRA: NDIlib_recv_color_format_e = 0;
+pub const NDIlib_recv_color_format_UYVY_BGRA: NDIlib_recv_color_format_e = 1;
+pub const NDIlib_recv_color_format_RGBX_RGBA: NDIlib_recv_color_format_e = 2;
+pub const NDIlib_recv_color_format_UYVY_RGBA: NDIlib_recv_color_format_e = 3;
+pub const NDIlib_recv_color_format_fastest: NDIlib_recv_color_format_e = 100;
+pub const NDIlib_recv_color_format_best: NDIlib_recv_color_format_e = 101;
 
 const fn make_fourcc(fourcc: &[u8; 4]) -> u32 {
     ((fourcc[0] as u32) << 0)

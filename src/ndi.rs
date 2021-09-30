@@ -263,7 +263,7 @@ impl RecvInstance {
             url_address,
             allow_video_fields: true,
             bandwidth: NDIlib_recv_bandwidth_highest,
-            color_format: NDIlib_recv_color_format_e::NDIlib_recv_color_format_UYVY_BGRA,
+            color_format: NDIlib_recv_color_format_UYVY_BGRA,
             ndi_recv_name,
         }
     }

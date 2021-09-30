@@ -465,7 +465,7 @@ impl Receiver {
         // broken with interlaced content currently
         let recv = RecvInstance::builder(ndi_name, url_address, receiver_ndi_name)
             .bandwidth(bandwidth)
-            .color_format(NDIlib_recv_color_format_e::NDIlib_recv_color_format_UYVY_BGRA)
+            .color_format(NDIlib_recv_color_format_UYVY_BGRA)
             .allow_video_fields(true)
             .build();
         let recv = match recv {
