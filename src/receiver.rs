@@ -493,6 +493,8 @@ impl Receiver {
     }
 
     fn receive_thread(receiver: &Weak<ReceiverInner>, recv: RecvInstance) {
+        let mut first_video_frame = true;
+        let mut first_audio_frame = true;
         let mut first_frame = true;
         let mut timer = time::Instant::now();
 
@@ -553,11 +555,31 @@ impl Receiver {
                 }
                 Ok(Some(Frame::Video(frame))) => {
                     first_frame = false;
-                    receiver.create_video_buffer_and_info(&element, frame)
+                    let mut buffer = receiver.create_video_buffer_and_info(&element, frame);
+                    if first_video_frame {
+                        if let Ok(Buffer::Video(ref mut buffer, _)) = buffer {
+                            buffer
+                                .get_mut()
+                                .unwrap()
+                                .set_flags(gst::BufferFlags::DISCONT);
+                            first_video_frame = false;
+                        }
+                    }
+                    buffer
                 }
                 Ok(Some(Frame::Audio(frame))) => {
                     first_frame = false;
-                    receiver.create_audio_buffer_and_info(&element, frame)
+                    let mut buffer = receiver.create_audio_buffer_and_info(&element, frame);
+                    if first_audio_frame {
+                        if let Ok(Buffer::Video(ref mut buffer, _)) = buffer {
+                            buffer
+                                .get_mut()
+                                .unwrap()
+                                .set_flags(gst::BufferFlags::DISCONT);
+                            first_audio_frame = false;
+                        }
+                    }
+                    buffer
                 }
                 Ok(Some(Frame::Metadata(frame))) => {
                     if let Some(metadata) = frame.metadata() {
