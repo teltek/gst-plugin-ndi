@@ -151,7 +151,7 @@ impl ElementImpl for NdiSink {
                 )
                 .structure(
                     gst::Structure::builder("audio/x-raw")
-                        .field("format", &gst_audio::AUDIO_FORMAT_S16.to_str())
+                        .field("format", &gst_audio::AUDIO_FORMAT_F32.to_str())
                         .field("rate", &gst::IntRange::<i32>::new(1, i32::MAX))
                         .field("channels", &gst::IntRange::<i32>::new(1, i32::MAX))
                         .field("layout", &"interleaved")
@@ -256,9 +256,8 @@ impl BaseSinkImpl for NdiSink {
         if let Some(ref info) = state.video_info {
             if let Some(audio_meta) = buffer.meta::<crate::ndisinkmeta::NdiSinkAudioMeta>() {
                 for (buffer, info, timecode) in audio_meta.buffers() {
-                    let frame =
-                        crate::ndi::AudioFrame::try_from_interleaved_16s(info, buffer, *timecode)
-                            .map_err(|_| {
+                    let frame = crate::ndi::AudioFrame::try_from_buffer(info, buffer, *timecode)
+                        .map_err(|_| {
                             gst_error!(CAT, obj: element, "Unsupported audio frame");
                             gst::FlowError::NotNegotiated
                         })?;
@@ -334,8 +333,8 @@ impl BaseSinkImpl for NdiSink {
                 .map(|time| (time.nseconds() / 100) as i64)
                 .unwrap_or(crate::ndisys::NDIlib_send_timecode_synthesize);
 
-            let frame = crate::ndi::AudioFrame::try_from_interleaved_16s(info, buffer, timecode)
-                .map_err(|_| {
+            let frame =
+                crate::ndi::AudioFrame::try_from_buffer(info, buffer, timecode).map_err(|_| {
                     gst_error!(CAT, obj: element, "Unsupported audio frame");
                     gst::FlowError::NotNegotiated
                 })?;

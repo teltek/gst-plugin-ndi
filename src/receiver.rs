@@ -3,7 +3,7 @@ use gst::prelude::*;
 use gst::{gst_debug, gst_error, gst_log, gst_trace, gst_warning};
 use gst_video::prelude::*;
 
-use byte_slice_cast::AsMutSliceOf;
+use byte_slice_cast::*;
 
 use std::cmp;
 use std::collections::VecDeque;
@@ -731,7 +731,7 @@ impl Receiver {
 
         let info = self.create_video_info(element, &video_frame)?;
 
-        let mut buffer = self.create_video_buffer(element, pts, duration, &info, &video_frame);
+        let mut buffer = self.create_video_buffer(element, pts, duration, &info, &video_frame)?;
         if discont {
             buffer
                 .get_mut()
@@ -888,8 +888,8 @@ impl Receiver {
         duration: Option<gst::ClockTime>,
         info: &gst_video::VideoInfo,
         video_frame: &VideoFrame,
-    ) -> gst::Buffer {
-        let mut buffer = gst::Buffer::with_size(info.size()).unwrap();
+    ) -> Result<gst::Buffer, gst::FlowError> {
+        let mut buffer = self.copy_video_frame(element, info, video_frame)?;
         {
             let buffer = buffer.get_mut().unwrap();
             buffer.set_pts(pts);
@@ -950,16 +950,18 @@ impl Receiver {
             }
         }
 
-        self.copy_video_frame(element, info, buffer, video_frame)
+        Ok(buffer)
     }
 
     fn copy_video_frame(
         &self,
         _element: &gst_base::BaseSrc,
         info: &gst_video::VideoInfo,
-        buffer: gst::Buffer,
         video_frame: &VideoFrame,
-    ) -> gst::Buffer {
+    ) -> Result<gst::Buffer, gst::FlowError> {
+        let src = video_frame.data().ok_or(gst::FlowError::NotNegotiated)?;
+
+        let buffer = gst::Buffer::with_size(info.size()).unwrap();
         let mut vframe = gst_video::VideoFrame::from_buffer_writable(buffer, info).unwrap();
 
         match info.format() {
@@ -976,7 +978,6 @@ impl Receiver {
                 let dest_stride = vframe.plane_stride()[0] as usize;
                 let dest = vframe.plane_data_mut(0).unwrap();
                 let src_stride = video_frame.line_stride_or_data_size_in_bytes() as usize;
-                let src = video_frame.data();
 
                 for (dest, src) in dest
                     .chunks_exact_mut(dest_stride)
@@ -993,7 +994,6 @@ impl Receiver {
                     let dest_stride = vframe.plane_stride()[0] as usize;
                     let dest = vframe.plane_data_mut(0).unwrap();
                     let src_stride = video_frame.line_stride_or_data_size_in_bytes() as usize;
-                    let src = video_frame.data();
 
                     for (dest, src) in dest
                         .chunks_exact_mut(dest_stride)
@@ -1009,7 +1009,7 @@ impl Receiver {
                     let dest_stride = vframe.plane_stride()[1] as usize;
                     let dest = vframe.plane_data_mut(1).unwrap();
                     let src_stride = video_frame.line_stride_or_data_size_in_bytes() as usize;
-                    let src = &video_frame.data()[(video_frame.yres() as usize * src_stride)..];
+                    let src = &src[(video_frame.yres() as usize * src_stride)..];
 
                     for (dest, src) in dest
                         .chunks_exact_mut(dest_stride)
@@ -1026,7 +1026,6 @@ impl Receiver {
                     let dest_stride = vframe.plane_stride()[0] as usize;
                     let dest = vframe.plane_data_mut(0).unwrap();
                     let src_stride = video_frame.line_stride_or_data_size_in_bytes() as usize;
-                    let src = video_frame.data();
 
                     for (dest, src) in dest
                         .chunks_exact_mut(dest_stride)
@@ -1043,7 +1042,7 @@ impl Receiver {
                     let dest = vframe.plane_data_mut(1).unwrap();
                     let src_stride = video_frame.line_stride_or_data_size_in_bytes() as usize;
                     let src_stride1 = video_frame.line_stride_or_data_size_in_bytes() as usize / 2;
-                    let src = &video_frame.data()[(video_frame.yres() as usize * src_stride)..];
+                    let src = &src[(video_frame.yres() as usize * src_stride)..];
 
                     for (dest, src) in dest
                         .chunks_exact_mut(dest_stride)
@@ -1060,7 +1059,7 @@ impl Receiver {
                     let dest = vframe.plane_data_mut(2).unwrap();
                     let src_stride = video_frame.line_stride_or_data_size_in_bytes() as usize;
                     let src_stride1 = video_frame.line_stride_or_data_size_in_bytes() as usize / 2;
-                    let src = &video_frame.data()[(video_frame.yres() as usize * src_stride
+                    let src = &src[(video_frame.yres() as usize * src_stride
                         + (video_frame.yres() as usize + 1) / 2 * src_stride1)..];
 
                     for (dest, src) in dest
@@ -1074,7 +1073,7 @@ impl Receiver {
             _ => unreachable!(),
         }
 
-        vframe.into_buffer()
+        Ok(vframe.into_buffer())
     }
 
     fn create_audio_buffer_and_info(
@@ -1093,7 +1092,7 @@ impl Receiver {
 
         let info = self.create_audio_info(element, &audio_frame)?;
 
-        let mut buffer = self.create_audio_buffer(element, pts, duration, &info, &audio_frame);
+        let mut buffer = self.create_audio_buffer(element, pts, duration, &info, &audio_frame)?;
         if discont {
             buffer
                 .get_mut()
@@ -1129,13 +1128,22 @@ impl Receiver {
         element: &gst_base::BaseSrc,
         audio_frame: &AudioFrame,
     ) -> Result<gst_audio::AudioInfo, gst::FlowError> {
+        if audio_frame.fourcc() != NDIlib_FourCC_audio_type_FLTp {
+            gst::element_error!(
+                element,
+                gst::StreamError::Format,
+                ["Unsupported audio fourcc {:08x}", audio_frame.fourcc()]
+            );
+            return Err(gst::FlowError::NotNegotiated);
+        }
+
         let builder = gst_audio::AudioInfo::builder(
-            gst_audio::AUDIO_FORMAT_S16,
+            gst_audio::AUDIO_FORMAT_F32,
             audio_frame.sample_rate() as u32,
             audio_frame.no_channels() as u32,
         );
 
-        builder.build().map_err(|_| {
+        let info = builder.build().map_err(|_| {
             gst::element_error!(
                 element,
                 gst::StreamError::Format,
@@ -1143,7 +1151,9 @@ impl Receiver {
             );
 
             gst::FlowError::NotNegotiated
-        })
+        })?;
+
+        Ok(info)
     }
 
     fn create_audio_buffer(
@@ -1153,9 +1163,10 @@ impl Receiver {
         duration: Option<gst::ClockTime>,
         info: &gst_audio::AudioInfo,
         audio_frame: &AudioFrame,
-    ) -> gst::Buffer {
-        // We multiply by 2 because is the size in bytes of an i16 variable
+    ) -> Result<gst::Buffer, gst::FlowError> {
+        let src = audio_frame.data().ok_or(gst::FlowError::NotNegotiated)?;
         let buff_size = (audio_frame.no_samples() as u32 * info.bpf()) as usize;
+
         let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
         {
             let buffer = buffer.get_mut().unwrap();
@@ -1181,15 +1192,32 @@ impl Receiver {
                 }
             }
 
-            audio_frame.copy_to_interleaved_16s(
-                buffer
-                    .map_writable()
-                    .unwrap()
-                    .as_mut_slice_of::<i16>()
-                    .unwrap(),
+            let mut dest = buffer.map_writable().unwrap();
+            let dest = dest
+                .as_mut_slice_of::<f32>()
+                .map_err(|_| gst::FlowError::NotNegotiated)?;
+            assert!(
+                dest.len()
+                    == audio_frame.no_samples() as usize * audio_frame.no_channels() as usize
             );
+
+            for (channel, samples) in src
+                .chunks_exact(audio_frame.channel_stride_or_data_size_in_bytes() as usize)
+                .enumerate()
+            {
+                let samples = samples
+                    .as_slice_of::<f32>()
+                    .map_err(|_| gst::FlowError::NotNegotiated)?;
+
+                for (i, sample) in samples[..audio_frame.no_samples() as usize]
+                    .into_iter()
+                    .enumerate()
+                {
+                    dest[i * (audio_frame.no_channels() as usize) + channel] = *sample;
+                }
+            }
         }
 
-        buffer
+        Ok(buffer)
     }
 }

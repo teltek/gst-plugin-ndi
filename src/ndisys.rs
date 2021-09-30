@@ -39,10 +39,10 @@ extern "C" {
         p_instance: NDIlib_recv_instance_t,
         p_metadata: *const NDIlib_metadata_frame_t,
     ) -> bool;
-    pub fn NDIlib_recv_capture_v2(
+    pub fn NDIlib_recv_capture_v3(
         p_instance: NDIlib_recv_instance_t,
         p_video_data: *mut NDIlib_video_frame_v2_t,
-        p_audio_data: *mut NDIlib_audio_frame_v2_t,
+        p_audio_data: *mut NDIlib_audio_frame_v3_t,
         p_metadata: *mut NDIlib_metadata_frame_t,
         timeout_in_ms: u32,
     ) -> NDIlib_frame_type_e;
@@ -50,9 +50,9 @@ extern "C" {
         p_instance: NDIlib_recv_instance_t,
         p_video_data: *mut NDIlib_video_frame_v2_t,
     );
-    pub fn NDIlib_recv_free_audio_v2(
+    pub fn NDIlib_recv_free_audio_v3(
         p_instance: NDIlib_recv_instance_t,
-        p_audio_data: *mut NDIlib_audio_frame_v2_t,
+        p_audio_data: *mut NDIlib_audio_frame_v3_t,
     );
     pub fn NDIlib_recv_free_metadata(
         p_instance: NDIlib_recv_instance_t,
@@ -70,9 +70,9 @@ extern "C" {
         p_instance: NDIlib_send_instance_t,
         p_video_data: *const NDIlib_video_frame_v2_t,
     );
-    pub fn NDIlib_send_send_audio_v2(
+    pub fn NDIlib_send_send_audio_v3(
         p_instance: NDIlib_send_instance_t,
-        p_audio_data: *const NDIlib_audio_frame_v2_t,
+        p_audio_data: *const NDIlib_audio_frame_v3_t,
     );
 }
 
@@ -138,6 +138,9 @@ pub const NDIlib_FourCC_video_type_BGRA: NDIlib_FourCC_video_type_e = make_fourc
 pub const NDIlib_FourCC_video_type_BGRX: NDIlib_FourCC_video_type_e = make_fourcc(b"BGRX");
 pub const NDIlib_FourCC_video_type_RGBA: NDIlib_FourCC_video_type_e = make_fourcc(b"RGBA");
 pub const NDIlib_FourCC_video_type_RGBX: NDIlib_FourCC_video_type_e = make_fourcc(b"RGBX");
+
+pub type NDIlib_FourCC_audio_type_e = u32;
+pub const NDIlib_FourCC_audio_type_FLTp: NDIlib_FourCC_video_type_e = make_fourcc(b"FLTp");
 
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -216,36 +219,14 @@ pub struct NDIlib_video_frame_v2_t {
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct NDIlib_audio_frame_v2_t {
+pub struct NDIlib_audio_frame_v3_t {
     pub sample_rate: ::std::os::raw::c_int,
     pub no_channels: ::std::os::raw::c_int,
     pub no_samples: ::std::os::raw::c_int,
     pub timecode: i64,
+    pub FourCC: NDIlib_FourCC_audio_type_e,
     pub p_data: *const ::std::os::raw::c_float,
-    pub channel_stride_in_bytes: ::std::os::raw::c_int,
+    pub channel_stride_or_data_size_in_bytes: ::std::os::raw::c_int,
     pub p_metadata: *const ::std::os::raw::c_char,
     pub timestamp: i64,
-}
-
-extern "C" {
-    pub fn NDIlib_util_audio_to_interleaved_16s_v2(
-        p_src: *const NDIlib_audio_frame_v2_t,
-        p_dst: *mut NDIlib_audio_frame_interleaved_16s_t,
-    );
-
-    pub fn NDIlib_util_audio_from_interleaved_16s_v2(
-        p_src: *const NDIlib_audio_frame_interleaved_16s_t,
-        p_dst: *mut NDIlib_audio_frame_v2_t,
-    );
-}
-
-#[repr(C)]
-#[derive(Debug, Copy, Clone)]
-pub struct NDIlib_audio_frame_interleaved_16s_t {
-    pub sample_rate: ::std::os::raw::c_int,
-    pub no_channels: ::std::os::raw::c_int,
-    pub no_samples: ::std::os::raw::c_int,
-    pub timecode: i64,
-    pub reference_level: ::std::os::raw::c_int,
-    pub p_data: *mut i16,
 }
