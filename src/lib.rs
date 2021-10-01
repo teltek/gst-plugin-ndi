@@ -52,6 +52,30 @@ pub enum RecvColorFormat {
     Fastest = 4,
     #[genum(name = "Best", nick = "best")]
     Best = 5,
+    #[cfg(feature = "advanced-sdk")]
+    #[genum(name = "Compressed v1", nick = "compressed-v1")]
+    CompressedV1 = 6,
+    #[cfg(feature = "advanced-sdk")]
+    #[genum(name = "Compressed v2", nick = "compressed-v2")]
+    CompressedV2 = 7,
+    #[cfg(feature = "advanced-sdk")]
+    #[genum(name = "Compressed v3", nick = "compressed-v3")]
+    CompressedV3 = 8,
+    #[cfg(feature = "advanced-sdk")]
+    #[genum(name = "Compressed v3 with audio", nick = "compressed-v3-with-audio")]
+    CompressedV3WithAudio = 9,
+    #[cfg(feature = "advanced-sdk")]
+    #[genum(name = "Compressed v4", nick = "compressed-v4")]
+    CompressedV4 = 10,
+    #[cfg(feature = "advanced-sdk")]
+    #[genum(name = "Compressed v4 with audio", nick = "compressed-v4-with-audio")]
+    CompressedV4WithAudio = 11,
+    #[cfg(feature = "advanced-sdk")]
+    #[genum(name = "Compressed v5", nick = "compressed-v5")]
+    CompressedV5 = 12,
+    #[cfg(feature = "advanced-sdk")]
+    #[genum(name = "Compressed v5 with audio", nick = "compressed-v5-with-audio")]
+    CompressedV5WithAudio = 13,
 }
 
 impl From<RecvColorFormat> for NDIlib_recv_color_format_e {
@@ -63,6 +87,28 @@ impl From<RecvColorFormat> for NDIlib_recv_color_format_e {
             RecvColorFormat::UyvyRgba => NDIlib_recv_color_format_UYVY_RGBA,
             RecvColorFormat::Fastest => NDIlib_recv_color_format_fastest,
             RecvColorFormat::Best => NDIlib_recv_color_format_best,
+            #[cfg(feature = "advanced-sdk")]
+            RecvColorFormat::CompressedV1 => NDIlib_recv_color_format_ex_compressed,
+            #[cfg(feature = "advanced-sdk")]
+            RecvColorFormat::CompressedV2 => NDIlib_recv_color_format_ex_compressed_v2,
+            #[cfg(feature = "advanced-sdk")]
+            RecvColorFormat::CompressedV3 => NDIlib_recv_color_format_ex_compressed_v3,
+            #[cfg(feature = "advanced-sdk")]
+            RecvColorFormat::CompressedV3WithAudio => {
+                NDIlib_recv_color_format_ex_compressed_v3_with_audio
+            }
+            #[cfg(feature = "advanced-sdk")]
+            RecvColorFormat::CompressedV4 => NDIlib_recv_color_format_ex_compressed_v4,
+            #[cfg(feature = "advanced-sdk")]
+            RecvColorFormat::CompressedV4WithAudio => {
+                NDIlib_recv_color_format_ex_compressed_v4_with_audio
+            }
+            #[cfg(feature = "advanced-sdk")]
+            RecvColorFormat::CompressedV5 => NDIlib_recv_color_format_ex_compressed_v5,
+            #[cfg(feature = "advanced-sdk")]
+            RecvColorFormat::CompressedV5WithAudio => {
+                NDIlib_recv_color_format_ex_compressed_v5_with_audio
+            }
         }
     }
 }

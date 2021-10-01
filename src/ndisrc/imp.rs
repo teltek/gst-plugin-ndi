@@ -59,9 +59,9 @@ impl Default for Settings {
 }
 
 struct State {
-    video_info: Option<gst_video::VideoInfo>,
+    video_info: Option<crate::VideoInfo>,
     video_caps: Option<gst::Caps>,
-    audio_info: Option<gst_audio::AudioInfo>,
+    audio_info: Option<crate::AudioInfo>,
     audio_caps: Option<gst::Caps>,
     current_latency: Option<gst::ClockTime>,
     receiver: Option<Receiver>,

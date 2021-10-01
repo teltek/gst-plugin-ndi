@@ -23,10 +23,155 @@ static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
 #[derive(Clone)]
 pub struct Receiver(Arc<ReceiverInner>);
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum AudioInfo {
+    AudioInfo(gst_audio::AudioInfo),
+    #[cfg(feature = "advanced-sdk")]
+    OpusInfo {
+        sample_rate: i32,
+        no_channels: i32,
+    },
+    #[cfg(feature = "advanced-sdk")]
+    AacInfo {
+        sample_rate: i32,
+        no_channels: i32,
+        codec_data: [u8; 2],
+    },
+}
+
+impl AudioInfo {
+    pub fn to_caps(&self) -> Result<gst::Caps, glib::BoolError> {
+        match self {
+            AudioInfo::AudioInfo(ref info) => info.to_caps(),
+            #[cfg(feature = "advanced-sdk")]
+            AudioInfo::OpusInfo {
+                sample_rate,
+                no_channels,
+            } => Ok(gst::Caps::builder("audio/x-opus")
+                .field("channels", *no_channels)
+                .field("rate", *sample_rate)
+                .field("channel-mapping-family", 0i32)
+                .build()),
+            #[cfg(feature = "advanced-sdk")]
+            AudioInfo::AacInfo {
+                sample_rate,
+                no_channels,
+                codec_data,
+            } => Ok(gst::Caps::builder("audio/mpeg")
+                .field("channels", *no_channels)
+                .field("rate", *sample_rate)
+                .field("mpegversion", 4i32)
+                .field("stream-format", "raw")
+                .field("codec_data", gst::Buffer::from_mut_slice(*codec_data))
+                .build()),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum VideoInfo {
+    VideoInfo(gst_video::VideoInfo),
+    #[cfg(feature = "advanced-sdk")]
+    SpeedHQInfo {
+        variant: String,
+        xres: i32,
+        yres: i32,
+        fps_n: i32,
+        fps_d: i32,
+        par_n: i32,
+        par_d: i32,
+        interlace_mode: gst_video::VideoInterlaceMode,
+    },
+    #[cfg(feature = "advanced-sdk")]
+    H264Info {
+        xres: i32,
+        yres: i32,
+        fps_n: i32,
+        fps_d: i32,
+        par_n: i32,
+        par_d: i32,
+        interlace_mode: gst_video::VideoInterlaceMode,
+    },
+    #[cfg(feature = "advanced-sdk")]
+    H265Info {
+        xres: i32,
+        yres: i32,
+        fps_n: i32,
+        fps_d: i32,
+        par_n: i32,
+        par_d: i32,
+        interlace_mode: gst_video::VideoInterlaceMode,
+    },
+}
+
+impl VideoInfo {
+    pub fn to_caps(&self) -> Result<gst::Caps, glib::BoolError> {
+        match self {
+            VideoInfo::VideoInfo(ref info) => info.to_caps(),
+            #[cfg(feature = "advanced-sdk")]
+            VideoInfo::SpeedHQInfo {
+                ref variant,
+                xres,
+                yres,
+                fps_n,
+                fps_d,
+                par_n,
+                par_d,
+                interlace_mode,
+            } => Ok(gst::Caps::builder("video/x-speedhq")
+                .field("width", *xres)
+                .field("height", *yres)
+                .field("framerate", gst::Fraction::new(*fps_n, *fps_d))
+                .field("pixel-aspect-ratio", gst::Fraction::new(*par_n, *par_d))
+                .field("interlace-mode", interlace_mode.to_str())
+                .field("variant", variant)
+                .build()),
+            #[cfg(feature = "advanced-sdk")]
+            VideoInfo::H264Info {
+                xres,
+                yres,
+                fps_n,
+                fps_d,
+                par_n,
+                par_d,
+                interlace_mode,
+                ..
+            } => Ok(gst::Caps::builder("video/x-h264")
+                .field("width", *xres)
+                .field("height", *yres)
+                .field("framerate", gst::Fraction::new(*fps_n, *fps_d))
+                .field("pixel-aspect-ratio", gst::Fraction::new(*par_n, *par_d))
+                .field("interlace-mode", interlace_mode.to_str())
+                .field("stream-format", "byte-stream")
+                .field("alignment", "au")
+                .build()),
+            #[cfg(feature = "advanced-sdk")]
+            VideoInfo::H265Info {
+                xres,
+                yres,
+                fps_n,
+                fps_d,
+                par_n,
+                par_d,
+                interlace_mode,
+                ..
+            } => Ok(gst::Caps::builder("video/x-h265")
+                .field("width", *xres)
+                .field("height", *yres)
+                .field("framerate", gst::Fraction::new(*fps_n, *fps_d))
+                .field("pixel-aspect-ratio", gst::Fraction::new(*par_n, *par_d))
+                .field("interlace-mode", interlace_mode.to_str())
+                .field("stream-format", "byte-stream")
+                .field("alignment", "au")
+                .build()),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum Buffer {
-    Audio(gst::Buffer, gst_audio::AudioInfo),
-    Video(gst::Buffer, gst_video::VideoInfo),
+    Audio(gst::Buffer, AudioInfo),
+    Video(gst::Buffer, VideoInfo),
 }
 
 #[derive(Debug)]
@@ -177,7 +322,7 @@ impl Observations {
 
         if remote_diff > 0 && local_diff > 0 {
             let slope = (local_diff as f64) / (remote_diff as f64);
-            if slope < 0.8 || slope > 1.2 {
+            if !(0.8..1.2).contains(&slope) {
                 gst_warning!(
                     CAT,
                     obj: element,
@@ -767,78 +912,23 @@ impl Receiver {
         &self,
         element: &gst_base::BaseSrc,
         video_frame: &VideoFrame,
-    ) -> Result<gst_video::VideoInfo, gst::FlowError> {
-        // YV12 and I420 are swapped in the NDI SDK compared to GStreamer
-        let format = match video_frame.fourcc() {
-            ndisys::NDIlib_FourCC_video_type_UYVY => gst_video::VideoFormat::Uyvy,
-            // FIXME: This drops the alpha plane!
-            ndisys::NDIlib_FourCC_video_type_UYVA => gst_video::VideoFormat::Uyvy,
-            ndisys::NDIlib_FourCC_video_type_YV12 => gst_video::VideoFormat::I420,
-            ndisys::NDIlib_FourCC_video_type_NV12 => gst_video::VideoFormat::Nv12,
-            ndisys::NDIlib_FourCC_video_type_I420 => gst_video::VideoFormat::Yv12,
-            ndisys::NDIlib_FourCC_video_type_BGRA => gst_video::VideoFormat::Bgra,
-            ndisys::NDIlib_FourCC_video_type_BGRX => gst_video::VideoFormat::Bgrx,
-            ndisys::NDIlib_FourCC_video_type_RGBA => gst_video::VideoFormat::Rgba,
-            ndisys::NDIlib_FourCC_video_type_RGBX => gst_video::VideoFormat::Rgbx,
-            _ => {
-                gst::element_error!(
-                    element,
-                    gst::StreamError::Format,
-                    ["Unsupported video fourcc {:08x}", video_frame.fourcc()]
-                );
-
-                return Err(gst::FlowError::NotNegotiated);
-            } // TODO: NDIlib_FourCC_video_type_P216 and NDIlib_FourCC_video_type_PA16 not
-              // supported by GStreamer
-        };
+    ) -> Result<VideoInfo, gst::FlowError> {
+        let fourcc = video_frame.fourcc();
 
         let par = gst::Fraction::approximate_f32(video_frame.picture_aspect_ratio())
             .unwrap_or_else(|| gst::Fraction::new(1, 1))
             * gst::Fraction::new(video_frame.yres(), video_frame.xres());
-
-        #[cfg(feature = "interlaced-fields")]
-        {
-            let mut builder = gst_video::VideoInfo::builder(
-                format,
-                video_frame.xres() as u32,
-                video_frame.yres() as u32,
-            )
-            .fps(gst::Fraction::from(video_frame.frame_rate()))
-            .par(par)
-            .interlace_mode(match video_frame.frame_format_type() {
-                ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_progressive => {
-                    gst_video::VideoInterlaceMode::Progressive
-                }
-                ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_interleaved => {
-                    gst_video::VideoInterlaceMode::Interleaved
-                }
-                _ => gst_video::VideoInterlaceMode::Alternate,
-            });
-
-            if video_frame.frame_format_type()
-                == ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_interleaved
-            {
-                builder = builder.field_order(gst_video::VideoFieldOrder::TopFieldFirst);
+        let interlace_mode = match video_frame.frame_format_type() {
+            ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_progressive => {
+                gst_video::VideoInterlaceMode::Progressive
             }
-
-            builder.build().map_err(|_| {
-                gst::element_error!(
-                    element,
-                    gst::StreamError::Format,
-                    ["Invalid video format configuration"]
-                );
-
-                gst::FlowError::NotNegotiated
-            })
-        }
-
-        #[cfg(not(feature = "interlaced-fields"))]
-        {
-            if video_frame.frame_format_type()
-                != ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_progressive
-                && video_frame.frame_format_type()
-                    != ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_interleaved
-            {
+            ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_interleaved => {
+                gst_video::VideoInterlaceMode::Interleaved
+            }
+            #[cfg(feature = "interlaced-fields")]
+            _ => gst_video::VideoInterlaceMode::Alternate,
+            #[cfg(not(feature = "interlaced-fields"))]
+            _ => {
                 gst::element_error!(
                     element,
                     gst::StreamError::Format,
@@ -846,40 +936,228 @@ impl Receiver {
                 );
                 return Err(gst::FlowError::NotNegotiated);
             }
+        };
 
-            let mut builder = gst_video::VideoInfo::builder(
-                format,
-                video_frame.xres() as u32,
-                video_frame.yres() as u32,
-            )
-            .fps(gst::Fraction::from(video_frame.frame_rate()))
-            .par(par)
-            .interlace_mode(
-                if video_frame.frame_format_type()
-                    == ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_progressive
-                {
-                    gst_video::VideoInterlaceMode::Progressive
-                } else {
-                    gst_video::VideoInterlaceMode::Interleaved
-                },
-            );
+        if [
+            ndisys::NDIlib_FourCC_video_type_UYVY,
+            ndisys::NDIlib_FourCC_video_type_UYVA,
+            ndisys::NDIlib_FourCC_video_type_YV12,
+            ndisys::NDIlib_FourCC_video_type_NV12,
+            ndisys::NDIlib_FourCC_video_type_I420,
+            ndisys::NDIlib_FourCC_video_type_BGRA,
+            ndisys::NDIlib_FourCC_video_type_BGRX,
+            ndisys::NDIlib_FourCC_video_type_RGBA,
+            ndisys::NDIlib_FourCC_video_type_BGRX,
+        ]
+        .contains(&fourcc)
+        {
+            // YV12 and I420 are swapped in the NDI SDK compared to GStreamer
+            let format = match video_frame.fourcc() {
+                ndisys::NDIlib_FourCC_video_type_UYVY => gst_video::VideoFormat::Uyvy,
+                // FIXME: This drops the alpha plane!
+                ndisys::NDIlib_FourCC_video_type_UYVA => gst_video::VideoFormat::Uyvy,
+                ndisys::NDIlib_FourCC_video_type_YV12 => gst_video::VideoFormat::I420,
+                ndisys::NDIlib_FourCC_video_type_NV12 => gst_video::VideoFormat::Nv12,
+                ndisys::NDIlib_FourCC_video_type_I420 => gst_video::VideoFormat::Yv12,
+                ndisys::NDIlib_FourCC_video_type_BGRA => gst_video::VideoFormat::Bgra,
+                ndisys::NDIlib_FourCC_video_type_BGRX => gst_video::VideoFormat::Bgrx,
+                ndisys::NDIlib_FourCC_video_type_RGBA => gst_video::VideoFormat::Rgba,
+                ndisys::NDIlib_FourCC_video_type_RGBX => gst_video::VideoFormat::Rgbx,
+                _ => {
+                    gst::element_error!(
+                        element,
+                        gst::StreamError::Format,
+                        ["Unsupported video fourcc {:08x}", video_frame.fourcc()]
+                    );
 
-            if video_frame.frame_format_type()
-                == ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_interleaved
+                    return Err(gst::FlowError::NotNegotiated);
+                } // TODO: NDIlib_FourCC_video_type_P216 and NDIlib_FourCC_video_type_PA16 not
+                  // supported by GStreamer
+            };
+
+            #[cfg(feature = "interlaced-fields")]
             {
-                builder = builder.field_order(gst_video::VideoFieldOrder::TopFieldFirst);
+                let mut builder = gst_video::VideoInfo::builder(
+                    format,
+                    video_frame.xres() as u32,
+                    video_frame.yres() as u32,
+                )
+                .fps(gst::Fraction::from(video_frame.frame_rate()))
+                .par(par)
+                .interlace_mode(interlace_mode);
+
+                if video_frame.frame_format_type()
+                    == ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_interleaved
+                {
+                    builder = builder.field_order(gst_video::VideoFieldOrder::TopFieldFirst);
+                }
+
+                return Ok(VideoInfo::VideoInfo(builder.build().map_err(|_| {
+                    gst::element_error!(
+                        element,
+                        gst::StreamError::Format,
+                        ["Invalid video format configuration"]
+                    );
+
+                    gst::FlowError::NotNegotiated
+                })?));
             }
 
-            builder.build().map_err(|_| {
-                gst::element_error!(
-                    element,
-                    gst::StreamError::Format,
-                    ["Invalid video format configuration"]
-                );
+            #[cfg(not(feature = "interlaced-fields"))]
+            {
+                let mut builder = gst_video::VideoInfo::builder(
+                    format,
+                    video_frame.xres() as u32,
+                    video_frame.yres() as u32,
+                )
+                .fps(gst::Fraction::from(video_frame.frame_rate()))
+                .par(par)
+                .interlace_mode(interlace_mode);
 
-                gst::FlowError::NotNegotiated
-            })
+                if video_frame.frame_format_type()
+                    == ndisys::NDIlib_frame_format_type_e::NDIlib_frame_format_type_interleaved
+                {
+                    builder = builder.field_order(gst_video::VideoFieldOrder::TopFieldFirst);
+                }
+
+                return Ok(VideoInfo::VideoInfo(builder.build().map_err(|_| {
+                    gst::element_error!(
+                        element,
+                        gst::StreamError::Format,
+                        ["Invalid video format configuration"]
+                    );
+
+                    gst::FlowError::NotNegotiated
+                })?));
+            }
         }
+
+        #[cfg(feature = "advanced-sdk")]
+        if [
+            ndisys::NDIlib_FourCC_video_type_ex_SHQ0_highest_bandwidth,
+            ndisys::NDIlib_FourCC_video_type_ex_SHQ2_highest_bandwidth,
+            ndisys::NDIlib_FourCC_video_type_ex_SHQ7_highest_bandwidth,
+            ndisys::NDIlib_FourCC_video_type_ex_SHQ0_lowest_bandwidth,
+            ndisys::NDIlib_FourCC_video_type_ex_SHQ2_lowest_bandwidth,
+            ndisys::NDIlib_FourCC_video_type_ex_SHQ7_lowest_bandwidth,
+        ]
+        .contains(&fourcc)
+        {
+            let variant = match fourcc {
+                ndisys::NDIlib_FourCC_video_type_ex_SHQ0_highest_bandwidth
+                | ndisys::NDIlib_FourCC_video_type_ex_SHQ0_lowest_bandwidth => String::from("SHQ0"),
+                ndisys::NDIlib_FourCC_video_type_ex_SHQ2_highest_bandwidth
+                | ndisys::NDIlib_FourCC_video_type_ex_SHQ2_lowest_bandwidth => String::from("SHQ2"),
+                ndisys::NDIlib_FourCC_video_type_ex_SHQ7_highest_bandwidth
+                | ndisys::NDIlib_FourCC_video_type_ex_SHQ7_lowest_bandwidth => String::from("SHQ7"),
+                _ => {
+                    gst::element_error!(
+                        element,
+                        gst::StreamError::Format,
+                        [
+                            "Unsupported SpeedHQ video fourcc {:08x}",
+                            video_frame.fourcc()
+                        ]
+                    );
+
+                    return Err(gst::FlowError::NotNegotiated);
+                }
+            };
+
+            return Ok(VideoInfo::SpeedHQInfo {
+                variant,
+                xres: video_frame.xres(),
+                yres: video_frame.yres(),
+                fps_n: video_frame.frame_rate().0,
+                fps_d: video_frame.frame_rate().1,
+                par_n: *par.numer(),
+                par_d: *par.denom(),
+                interlace_mode,
+            });
+        }
+
+        #[cfg(feature = "advanced-sdk")]
+        if [
+            ndisys::NDIlib_FourCC_video_type_ex_H264_highest_bandwidth,
+            ndisys::NDIlib_FourCC_video_type_ex_H264_lowest_bandwidth,
+            ndisys::NDIlib_FourCC_video_type_ex_H264_alpha_highest_bandwidth,
+            ndisys::NDIlib_FourCC_video_type_ex_H264_alpha_lowest_bandwidth,
+        ]
+        .contains(&fourcc)
+        {
+            let compressed_packet = video_frame.compressed_packet().ok_or_else(|| {
+                gst_error!(
+                    CAT,
+                    obj: element,
+                    "Video packet doesn't have compressed packet start"
+                );
+                gst::element_error!(element, gst::StreamError::Format, ["Invalid video packet"]);
+
+                gst::FlowError::Error
+            })?;
+
+            if compressed_packet.fourcc != NDIlib_compressed_FourCC_type_H264 {
+                gst_error!(CAT, obj: element, "Non-H264 video packet");
+                gst::element_error!(element, gst::StreamError::Format, ["Invalid video packet"]);
+
+                return Err(gst::FlowError::Error);
+            }
+
+            return Ok(VideoInfo::H264Info {
+                xres: video_frame.xres(),
+                yres: video_frame.yres(),
+                fps_n: video_frame.frame_rate().0,
+                fps_d: video_frame.frame_rate().1,
+                par_n: *par.numer(),
+                par_d: *par.denom(),
+                interlace_mode,
+            });
+        }
+
+        #[cfg(feature = "advanced-sdk")]
+        if [
+            ndisys::NDIlib_FourCC_video_type_ex_HEVC_highest_bandwidth,
+            ndisys::NDIlib_FourCC_video_type_ex_HEVC_lowest_bandwidth,
+            ndisys::NDIlib_FourCC_video_type_ex_HEVC_alpha_highest_bandwidth,
+            ndisys::NDIlib_FourCC_video_type_ex_HEVC_alpha_lowest_bandwidth,
+        ]
+        .contains(&fourcc)
+        {
+            let compressed_packet = video_frame.compressed_packet().ok_or_else(|| {
+                gst_error!(
+                    CAT,
+                    obj: element,
+                    "Video packet doesn't have compressed packet start"
+                );
+                gst::element_error!(element, gst::StreamError::Format, ["Invalid video packet"]);
+
+                gst::FlowError::Error
+            })?;
+
+            if compressed_packet.fourcc != NDIlib_compressed_FourCC_type_HEVC {
+                gst_error!(CAT, obj: element, "Non-H265 video packet");
+                gst::element_error!(element, gst::StreamError::Format, ["Invalid video packet"]);
+
+                return Err(gst::FlowError::Error);
+            }
+
+            return Ok(VideoInfo::H265Info {
+                xres: video_frame.xres(),
+                yres: video_frame.yres(),
+                fps_n: video_frame.frame_rate().0,
+                fps_d: video_frame.frame_rate().1,
+                par_n: *par.numer(),
+                par_d: *par.denom(),
+                interlace_mode,
+            });
+        }
+
+        gst::element_error!(
+            element,
+            gst::StreamError::Format,
+            ["Unsupported video fourcc {:08x}", video_frame.fourcc()]
+        );
+        Err(gst::FlowError::NotNegotiated)
     }
 
     fn create_video_buffer(
@@ -887,7 +1165,7 @@ impl Receiver {
         element: &gst_base::BaseSrc,
         pts: gst::ClockTime,
         duration: Option<gst::ClockTime>,
-        info: &gst_video::VideoInfo,
+        info: &VideoInfo,
         video_frame: &VideoFrame,
     ) -> Result<gst::Buffer, gst::FlowError> {
         let mut buffer = self.copy_video_frame(element, info, video_frame)?;
@@ -956,125 +1234,181 @@ impl Receiver {
 
     fn copy_video_frame(
         &self,
-        _element: &gst_base::BaseSrc,
-        info: &gst_video::VideoInfo,
+        #[allow(unused_variables)] element: &gst_base::BaseSrc,
+        info: &VideoInfo,
         video_frame: &VideoFrame,
     ) -> Result<gst::Buffer, gst::FlowError> {
-        let src = video_frame.data().ok_or(gst::FlowError::NotNegotiated)?;
+        match info {
+            VideoInfo::VideoInfo(ref info) => {
+                let src = video_frame.data().ok_or(gst::FlowError::Error)?;
 
-        let buffer = gst::Buffer::with_size(info.size()).unwrap();
-        let mut vframe = gst_video::VideoFrame::from_buffer_writable(buffer, info).unwrap();
+                let buffer = gst::Buffer::with_size(info.size()).unwrap();
+                let mut vframe = gst_video::VideoFrame::from_buffer_writable(buffer, info).unwrap();
 
-        match info.format() {
-            gst_video::VideoFormat::Uyvy
-            | gst_video::VideoFormat::Bgra
-            | gst_video::VideoFormat::Bgrx
-            | gst_video::VideoFormat::Rgba
-            | gst_video::VideoFormat::Rgbx => {
-                let line_bytes = if info.format() == gst_video::VideoFormat::Uyvy {
-                    2 * vframe.width() as usize
-                } else {
-                    4 * vframe.width() as usize
-                };
-                let dest_stride = vframe.plane_stride()[0] as usize;
-                let dest = vframe.plane_data_mut(0).unwrap();
-                let src_stride = video_frame.line_stride_or_data_size_in_bytes() as usize;
+                match info.format() {
+                    gst_video::VideoFormat::Uyvy
+                    | gst_video::VideoFormat::Bgra
+                    | gst_video::VideoFormat::Bgrx
+                    | gst_video::VideoFormat::Rgba
+                    | gst_video::VideoFormat::Rgbx => {
+                        let line_bytes = if info.format() == gst_video::VideoFormat::Uyvy {
+                            2 * vframe.width() as usize
+                        } else {
+                            4 * vframe.width() as usize
+                        };
+                        let dest_stride = vframe.plane_stride()[0] as usize;
+                        let dest = vframe.plane_data_mut(0).unwrap();
+                        let src_stride = video_frame.line_stride_or_data_size_in_bytes() as usize;
 
-                for (dest, src) in dest
-                    .chunks_exact_mut(dest_stride)
-                    .zip(src.chunks_exact(src_stride))
-                {
-                    dest.copy_from_slice(src);
-                    dest.copy_from_slice(&src[..line_bytes]);
+                        for (dest, src) in dest
+                            .chunks_exact_mut(dest_stride)
+                            .zip(src.chunks_exact(src_stride))
+                        {
+                            dest.copy_from_slice(src);
+                            dest.copy_from_slice(&src[..line_bytes]);
+                        }
+                    }
+                    gst_video::VideoFormat::Nv12 => {
+                        // First plane
+                        {
+                            let line_bytes = vframe.width() as usize;
+                            let dest_stride = vframe.plane_stride()[0] as usize;
+                            let dest = vframe.plane_data_mut(0).unwrap();
+                            let src_stride =
+                                video_frame.line_stride_or_data_size_in_bytes() as usize;
+
+                            for (dest, src) in dest
+                                .chunks_exact_mut(dest_stride)
+                                .zip(src.chunks_exact(src_stride))
+                            {
+                                dest.copy_from_slice(&src[..line_bytes]);
+                            }
+                        }
+
+                        // Second plane
+                        {
+                            let line_bytes = vframe.width() as usize;
+                            let dest_stride = vframe.plane_stride()[1] as usize;
+                            let dest = vframe.plane_data_mut(1).unwrap();
+                            let src_stride =
+                                video_frame.line_stride_or_data_size_in_bytes() as usize;
+                            let src = &src[(video_frame.yres() as usize * src_stride)..];
+
+                            for (dest, src) in dest
+                                .chunks_exact_mut(dest_stride)
+                                .zip(src.chunks_exact(src_stride))
+                            {
+                                dest.copy_from_slice(&src[..line_bytes]);
+                            }
+                        }
+                    }
+                    gst_video::VideoFormat::Yv12 | gst_video::VideoFormat::I420 => {
+                        // First plane
+                        {
+                            let line_bytes = vframe.width() as usize;
+                            let dest_stride = vframe.plane_stride()[0] as usize;
+                            let dest = vframe.plane_data_mut(0).unwrap();
+                            let src_stride =
+                                video_frame.line_stride_or_data_size_in_bytes() as usize;
+
+                            for (dest, src) in dest
+                                .chunks_exact_mut(dest_stride)
+                                .zip(src.chunks_exact(src_stride))
+                            {
+                                dest.copy_from_slice(&src[..line_bytes]);
+                            }
+                        }
+
+                        // Second plane
+                        {
+                            let line_bytes = (vframe.width() as usize + 1) / 2;
+                            let dest_stride = vframe.plane_stride()[1] as usize;
+                            let dest = vframe.plane_data_mut(1).unwrap();
+                            let src_stride =
+                                video_frame.line_stride_or_data_size_in_bytes() as usize;
+                            let src_stride1 =
+                                video_frame.line_stride_or_data_size_in_bytes() as usize / 2;
+                            let src = &src[(video_frame.yres() as usize * src_stride)..];
+
+                            for (dest, src) in dest
+                                .chunks_exact_mut(dest_stride)
+                                .zip(src.chunks_exact(src_stride1))
+                            {
+                                dest.copy_from_slice(&src[..line_bytes]);
+                            }
+                        }
+
+                        // Third plane
+                        {
+                            let line_bytes = (vframe.width() as usize + 1) / 2;
+                            let dest_stride = vframe.plane_stride()[2] as usize;
+                            let dest = vframe.plane_data_mut(2).unwrap();
+                            let src_stride =
+                                video_frame.line_stride_or_data_size_in_bytes() as usize;
+                            let src_stride1 =
+                                video_frame.line_stride_or_data_size_in_bytes() as usize / 2;
+                            let src = &src[(video_frame.yres() as usize * src_stride
+                                + (video_frame.yres() as usize + 1) / 2 * src_stride1)..];
+
+                            for (dest, src) in dest
+                                .chunks_exact_mut(dest_stride)
+                                .zip(src.chunks_exact(src_stride1))
+                            {
+                                dest.copy_from_slice(&src[..line_bytes]);
+                            }
+                        }
+                    }
+                    _ => unreachable!(),
                 }
+
+                Ok(vframe.into_buffer())
             }
-            gst_video::VideoFormat::Nv12 => {
-                // First plane
-                {
-                    let line_bytes = vframe.width() as usize;
-                    let dest_stride = vframe.plane_stride()[0] as usize;
-                    let dest = vframe.plane_data_mut(0).unwrap();
-                    let src_stride = video_frame.line_stride_or_data_size_in_bytes() as usize;
+            #[cfg(feature = "advanced-sdk")]
+            VideoInfo::SpeedHQInfo { .. } => {
+                let data = video_frame.data().ok_or_else(|| {
+                    gst_error!(CAT, obj: element, "Video packet has no data");
+                    gst::element_error!(
+                        element,
+                        gst::StreamError::Format,
+                        ["Invalid video packet"]
+                    );
 
-                    for (dest, src) in dest
-                        .chunks_exact_mut(dest_stride)
-                        .zip(src.chunks_exact(src_stride))
-                    {
-                        dest.copy_from_slice(&src[..line_bytes]);
-                    }
-                }
+                    gst::FlowError::Error
+                })?;
 
-                // Second plane
-                {
-                    let line_bytes = vframe.width() as usize;
-                    let dest_stride = vframe.plane_stride()[1] as usize;
-                    let dest = vframe.plane_data_mut(1).unwrap();
-                    let src_stride = video_frame.line_stride_or_data_size_in_bytes() as usize;
-                    let src = &src[(video_frame.yres() as usize * src_stride)..];
-
-                    for (dest, src) in dest
-                        .chunks_exact_mut(dest_stride)
-                        .zip(src.chunks_exact(src_stride))
-                    {
-                        dest.copy_from_slice(&src[..line_bytes]);
-                    }
-                }
+                Ok(gst::Buffer::from_mut_slice(Vec::from(data)))
             }
-            gst_video::VideoFormat::Yv12 | gst_video::VideoFormat::I420 => {
-                // First plane
-                {
-                    let line_bytes = vframe.width() as usize;
-                    let dest_stride = vframe.plane_stride()[0] as usize;
-                    let dest = vframe.plane_data_mut(0).unwrap();
-                    let src_stride = video_frame.line_stride_or_data_size_in_bytes() as usize;
+            #[cfg(feature = "advanced-sdk")]
+            VideoInfo::H264Info { .. } | VideoInfo::H265Info { .. } => {
+                let compressed_packet = video_frame.compressed_packet().ok_or_else(|| {
+                    gst_error!(
+                        CAT,
+                        obj: element,
+                        "Video packet doesn't have compressed packet start"
+                    );
+                    gst::element_error!(
+                        element,
+                        gst::StreamError::Format,
+                        ["Invalid video packet"]
+                    );
 
-                    for (dest, src) in dest
-                        .chunks_exact_mut(dest_stride)
-                        .zip(src.chunks_exact(src_stride))
-                    {
-                        dest.copy_from_slice(&src[..line_bytes]);
-                    }
+                    gst::FlowError::Error
+                })?;
+
+                let mut buffer = Vec::new();
+                if let Some(extra_data) = compressed_packet.extra_data {
+                    buffer.extend_from_slice(extra_data);
+                }
+                buffer.extend_from_slice(compressed_packet.data);
+                let mut buffer = gst::Buffer::from_mut_slice(buffer);
+                if !compressed_packet.key_frame {
+                    let buffer = buffer.get_mut().unwrap();
+                    buffer.set_flags(gst::BufferFlags::DELTA_UNIT);
                 }
 
-                // Second plane
-                {
-                    let line_bytes = (vframe.width() as usize + 1) / 2;
-                    let dest_stride = vframe.plane_stride()[1] as usize;
-                    let dest = vframe.plane_data_mut(1).unwrap();
-                    let src_stride = video_frame.line_stride_or_data_size_in_bytes() as usize;
-                    let src_stride1 = video_frame.line_stride_or_data_size_in_bytes() as usize / 2;
-                    let src = &src[(video_frame.yres() as usize * src_stride)..];
-
-                    for (dest, src) in dest
-                        .chunks_exact_mut(dest_stride)
-                        .zip(src.chunks_exact(src_stride1))
-                    {
-                        dest.copy_from_slice(&src[..line_bytes]);
-                    }
-                }
-
-                // Third plane
-                {
-                    let line_bytes = (vframe.width() as usize + 1) / 2;
-                    let dest_stride = vframe.plane_stride()[2] as usize;
-                    let dest = vframe.plane_data_mut(2).unwrap();
-                    let src_stride = video_frame.line_stride_or_data_size_in_bytes() as usize;
-                    let src_stride1 = video_frame.line_stride_or_data_size_in_bytes() as usize / 2;
-                    let src = &src[(video_frame.yres() as usize * src_stride
-                        + (video_frame.yres() as usize + 1) / 2 * src_stride1)..];
-
-                    for (dest, src) in dest
-                        .chunks_exact_mut(dest_stride)
-                        .zip(src.chunks_exact(src_stride1))
-                    {
-                        dest.copy_from_slice(&src[..line_bytes]);
-                    }
-                }
+                Ok(buffer)
             }
-            _ => unreachable!(),
         }
-
-        Ok(vframe.into_buffer())
     }
 
     fn create_audio_buffer_and_info(
@@ -1128,97 +1462,176 @@ impl Receiver {
         &self,
         element: &gst_base::BaseSrc,
         audio_frame: &AudioFrame,
-    ) -> Result<gst_audio::AudioInfo, gst::FlowError> {
-        if audio_frame.fourcc() != NDIlib_FourCC_audio_type_FLTp {
-            gst::element_error!(
-                element,
-                gst::StreamError::Format,
-                ["Unsupported audio fourcc {:08x}", audio_frame.fourcc()]
+    ) -> Result<AudioInfo, gst::FlowError> {
+        let fourcc = audio_frame.fourcc();
+
+        if [NDIlib_FourCC_audio_type_FLTp].contains(&fourcc) {
+            let builder = gst_audio::AudioInfo::builder(
+                gst_audio::AUDIO_FORMAT_F32,
+                audio_frame.sample_rate() as u32,
+                audio_frame.no_channels() as u32,
             );
-            return Err(gst::FlowError::NotNegotiated);
+
+            let info = builder.build().map_err(|_| {
+                gst::element_error!(
+                    element,
+                    gst::StreamError::Format,
+                    ["Invalid audio format configuration"]
+                );
+
+                gst::FlowError::NotNegotiated
+            })?;
+
+            return Ok(AudioInfo::AudioInfo(info));
         }
 
-        let builder = gst_audio::AudioInfo::builder(
-            gst_audio::AUDIO_FORMAT_F32,
-            audio_frame.sample_rate() as u32,
-            audio_frame.no_channels() as u32,
+        #[cfg(feature = "advanced-sdk")]
+        if [NDIlib_FourCC_audio_type_AAC].contains(&fourcc) {
+            use std::convert::TryInto;
+
+            let compressed_packet = audio_frame.compressed_packet().ok_or_else(|| {
+                gst_error!(
+                    CAT,
+                    obj: element,
+                    "Audio packet doesn't have compressed packet start"
+                );
+                gst::element_error!(element, gst::StreamError::Format, ["Invalid audio packet"]);
+
+                gst::FlowError::Error
+            })?;
+
+            if compressed_packet.fourcc != NDIlib_compressed_FourCC_type_AAC {
+                gst_error!(CAT, obj: element, "Non-AAC audio packet");
+                gst::element_error!(element, gst::StreamError::Format, ["Invalid audio packet"]);
+
+                return Err(gst::FlowError::Error);
+            }
+
+            return Ok(AudioInfo::AacInfo {
+                sample_rate: audio_frame.sample_rate(),
+                no_channels: audio_frame.no_channels(),
+                codec_data: compressed_packet
+                    .extra_data
+                    .ok_or(gst::FlowError::NotNegotiated)?
+                    .try_into()
+                    .map_err(|_| gst::FlowError::NotNegotiated)?,
+            });
+        }
+
+        #[cfg(feature = "advanced-sdk")]
+        if [NDIlib_FourCC_audio_type_Opus].contains(&fourcc) {}
+
+        gst::element_error!(
+            element,
+            gst::StreamError::Format,
+            ["Unsupported audio fourcc {:08x}", audio_frame.fourcc()]
         );
-
-        let info = builder.build().map_err(|_| {
-            gst::element_error!(
-                element,
-                gst::StreamError::Format,
-                ["Invalid audio format configuration"]
-            );
-
-            gst::FlowError::NotNegotiated
-        })?;
-
-        Ok(info)
+        Err(gst::FlowError::NotNegotiated)
     }
 
     fn create_audio_buffer(
         &self,
-        _element: &gst_base::BaseSrc,
+        #[allow(unused_variables)] element: &gst_base::BaseSrc,
         pts: gst::ClockTime,
         duration: Option<gst::ClockTime>,
-        info: &gst_audio::AudioInfo,
+        info: &AudioInfo,
         audio_frame: &AudioFrame,
     ) -> Result<gst::Buffer, gst::FlowError> {
-        let src = audio_frame.data().ok_or(gst::FlowError::NotNegotiated)?;
-        let buff_size = (audio_frame.no_samples() as u32 * info.bpf()) as usize;
+        match info {
+            AudioInfo::AudioInfo(ref info) => {
+                let src = audio_frame.data().ok_or(gst::FlowError::Error)?;
+                let buff_size = (audio_frame.no_samples() as u32 * info.bpf()) as usize;
 
-        let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
-        {
-            let buffer = buffer.get_mut().unwrap();
-
-            buffer.set_pts(pts);
-            buffer.set_duration(duration);
-
-            #[cfg(feature = "reference-timestamps")]
-            {
-                gst::ReferenceTimestampMeta::add(
-                    buffer,
-                    &*TIMECODE_CAPS,
-                    gst::ClockTime::from_nseconds(audio_frame.timecode() as u64 * 100),
-                    gst::ClockTime::NONE,
-                );
-                if audio_frame.timestamp() != ndisys::NDIlib_recv_timestamp_undefined {
-                    gst::ReferenceTimestampMeta::add(
-                        buffer,
-                        &*TIMESTAMP_CAPS,
-                        gst::ClockTime::from_nseconds(audio_frame.timestamp() as u64 * 100),
-                        gst::ClockTime::NONE,
-                    );
-                }
-            }
-
-            let mut dest = buffer.map_writable().unwrap();
-            let dest = dest
-                .as_mut_slice_of::<f32>()
-                .map_err(|_| gst::FlowError::NotNegotiated)?;
-            assert!(
-                dest.len()
-                    == audio_frame.no_samples() as usize * audio_frame.no_channels() as usize
-            );
-
-            for (channel, samples) in src
-                .chunks_exact(audio_frame.channel_stride_or_data_size_in_bytes() as usize)
-                .enumerate()
-            {
-                let samples = samples
-                    .as_slice_of::<f32>()
-                    .map_err(|_| gst::FlowError::NotNegotiated)?;
-
-                for (i, sample) in samples[..audio_frame.no_samples() as usize]
-                    .into_iter()
-                    .enumerate()
+                let mut buffer = gst::Buffer::with_size(buff_size).unwrap();
                 {
-                    dest[i * (audio_frame.no_channels() as usize) + channel] = *sample;
+                    let buffer = buffer.get_mut().unwrap();
+
+                    buffer.set_pts(pts);
+                    buffer.set_duration(duration);
+
+                    #[cfg(feature = "reference-timestamps")]
+                    {
+                        gst::ReferenceTimestampMeta::add(
+                            buffer,
+                            &*TIMECODE_CAPS,
+                            gst::ClockTime::from_nseconds(audio_frame.timecode() as u64 * 100),
+                            gst::ClockTime::NONE,
+                        );
+                        if audio_frame.timestamp() != ndisys::NDIlib_recv_timestamp_undefined {
+                            gst::ReferenceTimestampMeta::add(
+                                buffer,
+                                &*TIMESTAMP_CAPS,
+                                gst::ClockTime::from_nseconds(audio_frame.timestamp() as u64 * 100),
+                                gst::ClockTime::NONE,
+                            );
+                        }
+                    }
+
+                    let mut dest = buffer.map_writable().unwrap();
+                    let dest = dest
+                        .as_mut_slice_of::<f32>()
+                        .map_err(|_| gst::FlowError::NotNegotiated)?;
+                    assert!(
+                        dest.len()
+                            == audio_frame.no_samples() as usize
+                                * audio_frame.no_channels() as usize
+                    );
+
+                    for (channel, samples) in src
+                        .chunks_exact(audio_frame.channel_stride_or_data_size_in_bytes() as usize)
+                        .enumerate()
+                    {
+                        let samples = samples
+                            .as_slice_of::<f32>()
+                            .map_err(|_| gst::FlowError::NotNegotiated)?;
+
+                        for (i, sample) in samples[..audio_frame.no_samples() as usize]
+                            .iter()
+                            .enumerate()
+                        {
+                            dest[i * (audio_frame.no_channels() as usize) + channel] = *sample;
+                        }
+                    }
                 }
+
+                Ok(buffer)
+            }
+            #[cfg(feature = "advanced-sdk")]
+            AudioInfo::OpusInfo { .. } => {
+                let data = audio_frame.data().ok_or_else(|| {
+                    gst_error!(CAT, obj: element, "Audio packet has no data");
+                    gst::element_error!(
+                        element,
+                        gst::StreamError::Format,
+                        ["Invalid audio packet"]
+                    );
+
+                    gst::FlowError::Error
+                })?;
+
+                Ok(gst::Buffer::from_mut_slice(Vec::from(data)))
+            }
+            #[cfg(feature = "advanced-sdk")]
+            AudioInfo::AacInfo { .. } => {
+                let compressed_packet = audio_frame.compressed_packet().ok_or_else(|| {
+                    gst_error!(
+                        CAT,
+                        obj: element,
+                        "Audio packet doesn't have compressed packet start"
+                    );
+                    gst::element_error!(
+                        element,
+                        gst::StreamError::Format,
+                        ["Invalid audio packet"]
+                    );
+
+                    gst::FlowError::Error
+                })?;
+
+                Ok(gst::Buffer::from_mut_slice(Vec::from(
+                    compressed_packet.data,
+                )))
             }
         }
-
-        Ok(buffer)
     }
 }
