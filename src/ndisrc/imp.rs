@@ -475,7 +475,10 @@ impl BaseSrcImpl for NdiSrc {
                 let settings = self.settings.lock().unwrap();
 
                 if let Some(latency) = state.current_latency {
-                    let min = if settings.timestamp_mode != TimestampMode::Timecode {
+                    let min = if matches!(
+                        settings.timestamp_mode,
+                        TimestampMode::ReceiveTimeTimecode | TimestampMode::ReceiveTimeTimestamp
+                    ) {
                         latency
                     } else {
                         gst::ClockTime::ZERO

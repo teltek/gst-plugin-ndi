@@ -32,6 +32,8 @@ pub enum TimestampMode {
     Timecode = 2,
     #[genum(name = "NDI Timestamp", nick = "timestamp")]
     Timestamp = 3,
+    #[genum(name = "Receive Time", nick = "receive-time")]
+    ReceiveTime = 4,
 }
 
 fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
