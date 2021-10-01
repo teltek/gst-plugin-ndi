@@ -36,6 +36,37 @@ pub enum TimestampMode {
     ReceiveTime = 4,
 }
 
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, glib::GEnum)]
+#[repr(u32)]
+#[genum(type_name = "GstNdiRecvColorFormat")]
+pub enum RecvColorFormat {
+    #[genum(name = "BGRX or BGRA", nick = "bgrx-bgra")]
+    BgrxBgra = 0,
+    #[genum(name = "UYVY or BGRA", nick = "uyvy-bgra")]
+    UyvyBgra = 1,
+    #[genum(name = "RGBX or RGBA", nick = "rgbx-rgba")]
+    RgbxRgba = 2,
+    #[genum(name = "UYVY or RGBA", nick = "uyvy-rgba")]
+    UyvyRgba = 3,
+    #[genum(name = "Fastest", nick = "fastest")]
+    Fastest = 4,
+    #[genum(name = "Best", nick = "best")]
+    Best = 5,
+}
+
+impl From<RecvColorFormat> for NDIlib_recv_color_format_e {
+    fn from(v: RecvColorFormat) -> Self {
+        match v {
+            RecvColorFormat::BgrxBgra => NDIlib_recv_color_format_BGRX_BGRA,
+            RecvColorFormat::UyvyBgra => NDIlib_recv_color_format_UYVY_BGRA,
+            RecvColorFormat::RgbxRgba => NDIlib_recv_color_format_RGBX_RGBA,
+            RecvColorFormat::UyvyRgba => NDIlib_recv_color_format_UYVY_RGBA,
+            RecvColorFormat::Fastest => NDIlib_recv_color_format_fastest,
+            RecvColorFormat::Best => NDIlib_recv_color_format_best,
+        }
+    }
+}
+
 fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
     if !ndi::initialize() {
         return Err(glib::bool_error!("Cannot initialize NDI"));

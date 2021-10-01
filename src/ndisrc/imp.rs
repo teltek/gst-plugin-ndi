@@ -17,6 +17,7 @@ use crate::Buffer;
 use crate::Receiver;
 use crate::ReceiverControlHandle;
 use crate::ReceiverItem;
+use crate::RecvColorFormat;
 use crate::TimestampMode;
 use crate::DEFAULT_RECEIVER_NDI_NAME;
 
@@ -37,6 +38,7 @@ struct Settings {
     max_queue_length: u32,
     receiver_ndi_name: String,
     bandwidth: ndisys::NDIlib_recv_bandwidth_e,
+    color_format: RecvColorFormat,
     timestamp_mode: TimestampMode,
 }
 
@@ -50,6 +52,7 @@ impl Default for Settings {
             timeout: 5000,
             max_queue_length: 10,
             bandwidth: ndisys::NDIlib_recv_bandwidth_highest,
+            color_format: RecvColorFormat::UyvyBgra,
             timestamp_mode: TimestampMode::ReceiveTimeTimecode,
         }
     }
@@ -157,6 +160,14 @@ impl ObjectImpl for NdiSrc {
                     -10,
                     100,
                     100,
+                    glib::ParamFlags::READWRITE,
+                ),
+                glib::ParamSpec::new_enum(
+                    "color-format",
+                    "Color Format",
+                    "Receive color format",
+                    RecvColorFormat::static_type(),
+                    RecvColorFormat::UyvyBgra as u32 as i32,
                     glib::ParamFlags::READWRITE,
                 ),
                 glib::ParamSpec::new_enum(
@@ -275,6 +286,18 @@ impl ObjectImpl for NdiSrc {
                 );
                 settings.bandwidth = bandwidth;
             }
+            "color-format" => {
+                let mut settings = self.settings.lock().unwrap();
+                let color_format = value.get().unwrap();
+                gst_debug!(
+                    CAT,
+                    obj: obj,
+                    "Changing color format from {:?} to {:?}",
+                    settings.color_format,
+                    color_format,
+                );
+                settings.color_format = color_format;
+            }
             "timestamp-mode" => {
                 let mut settings = self.settings.lock().unwrap();
                 let timestamp_mode = value.get().unwrap();
@@ -323,6 +346,10 @@ impl ObjectImpl for NdiSrc {
             "bandwidth" => {
                 let settings = self.settings.lock().unwrap();
                 settings.bandwidth.to_value()
+            }
+            "color-format" => {
+                let settings = self.settings.lock().unwrap();
+                settings.color_format.to_value()
             }
             "timestamp-mode" => {
                 let settings = self.settings.lock().unwrap();
@@ -432,6 +459,7 @@ impl BaseSrcImpl for NdiSrc {
             &settings.receiver_ndi_name,
             settings.connect_timeout,
             settings.bandwidth,
+            settings.color_format.into(),
             settings.timestamp_mode,
             settings.timeout,
             settings.max_queue_length as usize,
