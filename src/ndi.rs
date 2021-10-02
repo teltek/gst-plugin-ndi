@@ -263,7 +263,7 @@ impl RecvInstance {
             url_address,
             allow_video_fields: true,
             bandwidth: NDIlib_recv_bandwidth_highest,
-            color_format: NDIlib_recv_color_format_e::NDIlib_recv_color_format_UYVY_BGRA,
+            color_format: NDIlib_recv_color_format_UYVY_BGRA,
             ndi_recv_name,
         }
     }
@@ -292,7 +292,7 @@ impl RecvInstance {
             let mut audio_frame = mem::zeroed();
             let mut metadata_frame = mem::zeroed();
 
-            let res = NDIlib_recv_capture_v2(
+            let res = NDIlib_recv_capture_v3(
                 ptr,
                 &mut video_frame,
                 &mut audio_frame,
@@ -386,7 +386,7 @@ impl SendInstance {
 
     pub fn send_audio(&mut self, frame: &AudioFrame) {
         unsafe {
-            NDIlib_send_send_audio_v2(self.0.as_ptr(), frame.as_ptr());
+            NDIlib_send_send_audio_v3(self.0.as_ptr(), frame.as_ptr());
         }
     }
 }
@@ -501,26 +501,144 @@ impl<'a> VideoFrame<'a> {
         }
     }
 
-    pub fn data(&self) -> &[u8] {
-        // FIXME: Unclear if this is correct. Needs to be validated against an actual
-        // interlaced stream
-        let frame_size = if self.frame_format_type()
-            == NDIlib_frame_format_type_e::NDIlib_frame_format_type_field_0
-            || self.frame_format_type()
-                == NDIlib_frame_format_type_e::NDIlib_frame_format_type_field_1
+    pub fn data(&self) -> Option<&[u8]> {
+        let fourcc = self.fourcc();
+
+        if [
+            NDIlib_FourCC_video_type_UYVY,
+            NDIlib_FourCC_video_type_UYVA,
+            NDIlib_FourCC_video_type_P216,
+            NDIlib_FourCC_video_type_PA16,
+            NDIlib_FourCC_video_type_YV12,
+            NDIlib_FourCC_video_type_I420,
+            NDIlib_FourCC_video_type_NV12,
+            NDIlib_FourCC_video_type_BGRA,
+            NDIlib_FourCC_video_type_BGRX,
+            NDIlib_FourCC_video_type_RGBA,
+            NDIlib_FourCC_video_type_RGBX,
+        ]
+        .contains(&fourcc)
         {
-            self.yres() * self.line_stride_or_data_size_in_bytes() / 2
-        } else {
-            self.yres() * self.line_stride_or_data_size_in_bytes()
-        };
+            // FIXME: Unclear if this is correct. Needs to be validated against an actual
+            // interlaced stream
+            let frame_size = if self.frame_format_type()
+                == NDIlib_frame_format_type_e::NDIlib_frame_format_type_field_0
+                || self.frame_format_type()
+                    == NDIlib_frame_format_type_e::NDIlib_frame_format_type_field_1
+            {
+                self.yres() * self.line_stride_or_data_size_in_bytes() / 2
+            } else {
+                self.yres() * self.line_stride_or_data_size_in_bytes()
+            };
+
+            return unsafe {
+                use std::slice;
+                match self {
+                    VideoFrame::BorrowedRecv(ref frame, _)
+                    | VideoFrame::BorrowedGst(ref frame, _) => Some(slice::from_raw_parts(
+                        frame.p_data as *const u8,
+                        frame_size as usize,
+                    )),
+                }
+            };
+        }
+
+        #[cfg(feature = "advanced-sdk")]
+        if [
+            NDIlib_FourCC_video_type_ex_SHQ0_highest_bandwidth,
+            NDIlib_FourCC_video_type_ex_SHQ2_highest_bandwidth,
+            NDIlib_FourCC_video_type_ex_SHQ7_highest_bandwidth,
+            NDIlib_FourCC_video_type_ex_SHQ0_lowest_bandwidth,
+            NDIlib_FourCC_video_type_ex_SHQ2_lowest_bandwidth,
+            NDIlib_FourCC_video_type_ex_SHQ7_lowest_bandwidth,
+        ]
+        .contains(&fourcc)
+        {
+            return unsafe {
+                use std::slice;
+                match self {
+                    VideoFrame::BorrowedRecv(ref frame, _)
+                    | VideoFrame::BorrowedGst(ref frame, _) => Some(slice::from_raw_parts(
+                        frame.p_data as *const u8,
+                        frame.line_stride_or_data_size_in_bytes as usize,
+                    )),
+                }
+            };
+        }
+
+        None
+    }
+
+    #[cfg(feature = "advanced-sdk")]
+    pub fn compressed_packet(&self) -> Option<CompressedPacket> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        use std::io::Cursor;
+        use std::slice;
 
         unsafe {
-            use std::slice;
-            match self {
-                VideoFrame::BorrowedRecv(ref frame, _) | VideoFrame::BorrowedGst(ref frame, _) => {
-                    slice::from_raw_parts(frame.p_data as *const u8, frame_size as usize)
-                }
+            let fourcc = self.fourcc();
+
+            if ![
+                NDIlib_FourCC_video_type_ex_H264_highest_bandwidth,
+                NDIlib_FourCC_video_type_ex_H264_lowest_bandwidth,
+                NDIlib_FourCC_video_type_ex_HEVC_highest_bandwidth,
+                NDIlib_FourCC_video_type_ex_HEVC_lowest_bandwidth,
+                NDIlib_FourCC_video_type_ex_H264_alpha_highest_bandwidth,
+                NDIlib_FourCC_video_type_ex_H264_alpha_lowest_bandwidth,
+                NDIlib_FourCC_video_type_ex_HEVC_alpha_highest_bandwidth,
+                NDIlib_FourCC_video_type_ex_HEVC_alpha_lowest_bandwidth,
+            ]
+            .contains(&fourcc)
+            {
+                return None;
             }
+
+            let data = match self {
+                VideoFrame::BorrowedRecv(ref frame, _) | VideoFrame::BorrowedGst(ref frame, _) => {
+                    slice::from_raw_parts(
+                        frame.p_data as *const u8,
+                        frame.line_stride_or_data_size_in_bytes as usize,
+                    )
+                }
+            };
+
+            let mut cursor = Cursor::new(data);
+            let version = cursor.read_u32::<LittleEndian>().ok()?;
+            if version != ndisys::NDIlib_compressed_packet_version_0 {
+                return None;
+            }
+
+            let fourcc = cursor.read_u32::<LittleEndian>().ok()?;
+            let pts = cursor.read_i64::<LittleEndian>().ok()?;
+            let dts = cursor.read_i64::<LittleEndian>().ok()?;
+            let _reserved = cursor.read_u64::<LittleEndian>().ok()?;
+            let flags = cursor.read_u32::<LittleEndian>().ok()?;
+            let data_size = cursor.read_u32::<LittleEndian>().ok()?;
+            let extra_data_size = cursor.read_u32::<LittleEndian>().ok()?;
+
+            let expected_size = (ndisys::NDIlib_compressed_packet_version_0 as usize)
+                .checked_add(data_size as usize)?
+                .checked_add(extra_data_size as usize)?;
+            if data.len() < expected_size {
+                return None;
+            }
+
+            Some(CompressedPacket {
+                fourcc,
+                pts,
+                dts,
+                key_frame: flags & ndisys::NDIlib_compressed_packet_flags_keyframe != 0,
+                data: &data[ndisys::NDIlib_compressed_packet_version_0 as usize..]
+                    [..data_size as usize],
+                extra_data: if extra_data_size > 0 {
+                    Some(
+                        &data[ndisys::NDIlib_compressed_packet_version_0 as usize
+                            + data_size as usize..][..extra_data_size as usize],
+                    )
+                } else {
+                    None
+                },
+            })
         }
     }
 
@@ -710,11 +828,11 @@ impl<'a> Drop for VideoFrame<'a> {
 #[derive(Debug)]
 pub enum AudioFrame<'a> {
     Owned(
-        NDIlib_audio_frame_v2_t,
+        NDIlib_audio_frame_v3_t,
         Option<ffi::CString>,
         Option<Vec<f32>>,
     ),
-    BorrowedRecv(NDIlib_audio_frame_v2_t, &'a RecvInstance),
+    BorrowedRecv(NDIlib_audio_frame_v3_t, &'a RecvInstance),
 }
 
 impl<'a> AudioFrame<'a> {
@@ -750,24 +868,114 @@ impl<'a> AudioFrame<'a> {
         }
     }
 
-    pub fn data(&self) -> &[u8] {
-        unsafe {
-            use std::slice;
-            match self {
-                AudioFrame::BorrowedRecv(ref frame, _) | AudioFrame::Owned(ref frame, _, _) => {
-                    slice::from_raw_parts(
-                        frame.p_data as *const u8,
-                        (frame.no_samples * frame.channel_stride_in_bytes) as usize,
-                    )
-                }
+    pub fn fourcc(&self) -> NDIlib_FourCC_audio_type_e {
+        match self {
+            AudioFrame::BorrowedRecv(ref frame, _) | AudioFrame::Owned(ref frame, _, _) => {
+                frame.FourCC
             }
         }
     }
 
-    pub fn channel_stride_in_bytes(&self) -> i32 {
+    pub fn data(&self) -> Option<&[u8]> {
+        unsafe {
+            use std::slice;
+
+            let fourcc = self.fourcc();
+
+            if [NDIlib_FourCC_audio_type_FLTp].contains(&fourcc) {
+                return match self {
+                    AudioFrame::BorrowedRecv(ref frame, _) | AudioFrame::Owned(ref frame, _, _) => {
+                        Some(slice::from_raw_parts(
+                            frame.p_data as *const u8,
+                            (frame.no_channels * frame.channel_stride_or_data_size_in_bytes)
+                                as usize,
+                        ))
+                    }
+                };
+            }
+
+            #[cfg(feature = "advanced-sdk")]
+            if [NDIlib_FourCC_audio_type_Opus].contains(&fourcc) {
+                return match self {
+                    AudioFrame::BorrowedRecv(ref frame, _) | AudioFrame::Owned(ref frame, _, _) => {
+                        Some(slice::from_raw_parts(
+                            frame.p_data as *const u8,
+                            frame.channel_stride_or_data_size_in_bytes as usize,
+                        ))
+                    }
+                };
+            }
+
+            None
+        }
+    }
+
+    #[cfg(feature = "advanced-sdk")]
+    pub fn compressed_packet(&self) -> Option<CompressedPacket> {
+        use byteorder::{LittleEndian, ReadBytesExt};
+        use std::io::Cursor;
+        use std::slice;
+
+        unsafe {
+            let fourcc = self.fourcc();
+
+            if ![NDIlib_FourCC_audio_type_AAC].contains(&fourcc) {
+                return None;
+            }
+
+            let data = match self {
+                AudioFrame::BorrowedRecv(ref frame, _) | AudioFrame::Owned(ref frame, _, _) => {
+                    slice::from_raw_parts(
+                        frame.p_data as *const u8,
+                        frame.channel_stride_or_data_size_in_bytes as usize,
+                    )
+                }
+            };
+
+            let mut cursor = Cursor::new(data);
+            let version = cursor.read_u32::<LittleEndian>().ok()?;
+            if version != ndisys::NDIlib_compressed_packet_version_0 {
+                return None;
+            }
+
+            let fourcc = cursor.read_u32::<LittleEndian>().ok()?;
+            let pts = cursor.read_i64::<LittleEndian>().ok()?;
+            let dts = cursor.read_i64::<LittleEndian>().ok()?;
+            let _reserved = cursor.read_u64::<LittleEndian>().ok()?;
+            let flags = cursor.read_u32::<LittleEndian>().ok()?;
+            let data_size = cursor.read_u32::<LittleEndian>().ok()?;
+            let extra_data_size = cursor.read_u32::<LittleEndian>().ok()?;
+
+            let expected_size = (ndisys::NDIlib_compressed_packet_version_0 as usize)
+                .checked_add(data_size as usize)?
+                .checked_add(extra_data_size as usize)?;
+            if data.len() < expected_size {
+                return None;
+            }
+
+            Some(CompressedPacket {
+                fourcc,
+                pts,
+                dts,
+                key_frame: flags & ndisys::NDIlib_compressed_packet_flags_keyframe != 0,
+                data: &data[ndisys::NDIlib_compressed_packet_version_0 as usize..]
+                    [..data_size as usize],
+                extra_data: if extra_data_size > 0 {
+                    Some(
+                        &data[ndisys::NDIlib_compressed_packet_version_0 as usize
+                            + data_size as usize..][..extra_data_size as usize],
+                    )
+                } else {
+                    None
+                },
+            })
+        }
+    }
+
+    pub fn channel_stride_or_data_size_in_bytes(&self) -> i32 {
         match self {
             AudioFrame::BorrowedRecv(ref frame, _) | AudioFrame::Owned(ref frame, _, _) => {
-                frame.channel_stride_in_bytes
+                frame.channel_stride_or_data_size_in_bytes
             }
         }
     }
@@ -794,72 +1002,54 @@ impl<'a> AudioFrame<'a> {
         }
     }
 
-    pub fn as_ptr(&self) -> *const NDIlib_audio_frame_v2_t {
+    pub fn as_ptr(&self) -> *const NDIlib_audio_frame_v3_t {
         match self {
             AudioFrame::BorrowedRecv(ref frame, _) | AudioFrame::Owned(ref frame, _, _) => frame,
         }
     }
 
-    pub fn copy_to_interleaved_16s(&self, data: &mut [i16]) {
-        assert_eq!(
-            data.len(),
-            (self.no_samples() * self.no_channels()) as usize
-        );
-
-        let mut dst = NDIlib_audio_frame_interleaved_16s_t {
-            sample_rate: self.sample_rate(),
-            no_channels: self.no_channels(),
-            no_samples: self.no_samples(),
-            timecode: self.timecode(),
-            reference_level: 0,
-            p_data: data.as_mut_ptr(),
-        };
-
-        unsafe {
-            NDIlib_util_audio_to_interleaved_16s_v2(self.as_ptr(), &mut dst);
-        }
-    }
-
-    pub fn try_from_interleaved_16s(
+    pub fn try_from_buffer(
         info: &gst_audio::AudioInfo,
         buffer: &gst::BufferRef,
         timecode: i64,
     ) -> Result<Self, ()> {
-        if info.format() != gst_audio::AUDIO_FORMAT_S16 {
+        if info.format() != gst_audio::AUDIO_FORMAT_F32 {
             return Err(());
         }
 
         let map = buffer.map_readable().map_err(|_| ())?;
-        let src_data = map.as_slice_of::<i16>().map_err(|_| ())?;
+        let src_data = map.as_slice_of::<f32>().map_err(|_| ())?;
 
-        let src = NDIlib_audio_frame_interleaved_16s_t {
+        let no_samples = src_data.len() as i32 / info.channels() as i32;
+        let channel_stride_or_data_size_in_bytes = no_samples * mem::size_of::<f32>() as i32;
+        let mut dest_data =
+            Vec::<f32>::with_capacity(no_samples as usize * info.channels() as usize);
+
+        assert_eq!(dest_data.capacity(), src_data.len());
+
+        unsafe {
+            let dest_ptr = dest_data.as_mut_ptr();
+
+            for (i, samples) in src_data.chunks_exact(info.channels() as usize).enumerate() {
+                for (c, sample) in samples.iter().enumerate() {
+                    ptr::write(dest_ptr.add(c * no_samples as usize + i), *sample);
+                }
+            }
+
+            dest_data.set_len(no_samples as usize * info.channels() as usize);
+        }
+
+        let dest = NDIlib_audio_frame_v3_t {
             sample_rate: info.rate() as i32,
             no_channels: info.channels() as i32,
-            no_samples: src_data.len() as i32 / info.channels() as i32,
+            no_samples,
             timecode,
-            reference_level: 0,
-            p_data: src_data.as_ptr() as *mut i16,
-        };
-
-        let channel_stride_in_bytes = src.no_samples * mem::size_of::<f32>() as i32;
-        let mut dest_data =
-            Vec::with_capacity(channel_stride_in_bytes as usize * info.channels() as usize);
-
-        let mut dest = NDIlib_audio_frame_v2_t {
-            sample_rate: src.sample_rate,
-            no_channels: src.no_channels,
-            no_samples: src.no_samples,
-            timecode: src.timecode,
+            FourCC: NDIlib_FourCC_audio_type_FLTp,
             p_data: dest_data.as_mut_ptr(),
-            channel_stride_in_bytes,
+            channel_stride_or_data_size_in_bytes,
             p_metadata: ptr::null(),
             timestamp: 0,
         };
-
-        unsafe {
-            NDIlib_util_audio_from_interleaved_16s_v2(&src, &mut dest);
-            dest_data.set_len(dest_data.capacity());
-        }
 
         Ok(AudioFrame::Owned(dest, None, Some(dest_data)))
     }
@@ -870,10 +1060,20 @@ impl<'a> Drop for AudioFrame<'a> {
     fn drop(&mut self) {
         if let AudioFrame::BorrowedRecv(ref mut frame, recv) = *self {
             unsafe {
-                NDIlib_recv_free_audio_v2(recv.0.as_ptr() as *mut _, frame);
+                NDIlib_recv_free_audio_v3(recv.0.as_ptr() as *mut _, frame);
             }
         }
     }
+}
+
+#[cfg(feature = "advanced-sdk")]
+pub struct CompressedPacket<'a> {
+    pub fourcc: ndisys::NDIlib_compressed_FourCC_type_e,
+    pub pts: i64,
+    pub dts: i64,
+    pub key_frame: bool,
+    pub data: &'a [u8],
+    pub extra_data: Option<&'a [u8]>,
 }
 
 #[derive(Debug)]

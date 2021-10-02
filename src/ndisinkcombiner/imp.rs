@@ -122,7 +122,7 @@ impl ElementImpl for NdiSinkCombiner {
             .unwrap();
 
             let caps = gst::Caps::builder("audio/x-raw")
-                .field("format", &gst_audio::AUDIO_FORMAT_S16.to_str())
+                .field("format", &gst_audio::AUDIO_FORMAT_F32.to_str())
                 .field("rate", &gst::IntRange::<i32>::new(1, i32::MAX))
                 .field("channels", &gst::IntRange::<i32>::new(1, i32::MAX))
                 .field("layout", &"interleaved")
