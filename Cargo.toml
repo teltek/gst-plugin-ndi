@@ -9,7 +9,7 @@ edition = "2018"
 
 [dependencies]
 glib = "0.14"
-gst = { package = "gstreamer", version = "0.17", features = ["v1_12"] }
+gst = { package = "gstreamer", version = "0.17.4", features = ["v1_12"] }
 gst-base = { package = "gstreamer-base", version = "0.17" }
 gst-audio = { package = "gstreamer-audio", version = "0.17" }
 gst-video = { package = "gstreamer-video", version = "0.17", features = ["v1_12"] }
