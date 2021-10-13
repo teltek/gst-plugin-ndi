@@ -8,6 +8,7 @@ description = "NewTek NDI Plugin"
 edition = "2018"
 
 [dependencies]
+libc = { version = "0.2", optional = true }
 glib = "0.14"
 gst = { package = "gstreamer", version = "0.17.4", features = ["v1_12"] }
 gst-base = { package = "gstreamer-base", version = "0.17" }
@@ -27,7 +28,7 @@ default = ["interlaced-fields", "reference-timestamps", "sink"]
 interlaced-fields = ["gst/v1_16", "gst-video/v1_16"]
 reference-timestamps = ["gst/v1_14"]
 sink = ["gst/v1_18", "gst-base/v1_18"]
-sink-v1_14 = ["gst/v1_14", "gst-base/v1_14"]
+sink-v1_14 = ["libc", "gst/v1_14", "gst-base/v1_14"]
 advanced-sdk = []
 
 [lib]
