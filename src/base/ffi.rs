@@ -222,6 +222,7 @@ extern "C" {
     );
     pub fn gst_aggregator_set_src_caps(self_: *mut GstAggregator, caps: *mut gst::GstCaps);
     pub fn gst_aggregator_simple_get_next_time(self_: *mut GstAggregator) -> gst::GstClockTime;
+    pub fn gst_aggregator_update_segment(self_: *mut GstAggregator, segment: *const gst::GstSegment);
 
     //=========================================================================
     // GstAggregatorPad

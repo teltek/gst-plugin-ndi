@@ -54,6 +54,9 @@ pub trait AggregatorExt: 'static {
     #[doc(alias = "gst_aggregator_set_src_caps")]
     fn set_src_caps(&self, caps: &gst::Caps);
 
+    #[doc(alias = "gst_aggregator_update_segment")]
+    fn update_segment(&self, segment: &gst::Segment);
+
     #[doc(alias = "gst_aggregator_simple_get_next_time")]
     fn simple_get_next_time(&self) -> Option<gst::ClockTime>;
 
@@ -120,6 +123,12 @@ impl<O: IsA<Aggregator>> AggregatorExt for O {
     fn set_src_caps(&self, caps: &gst::Caps) {
         unsafe {
             ffi::gst_aggregator_set_src_caps(self.as_ref().to_glib_none().0, caps.to_glib_none().0);
+        }
+    }
+
+    fn update_segment(&self, segment: &gst::Segment) {
+        unsafe {
+            ffi::gst_aggregator_update_segment(self.as_ref().to_glib_none().0, segment.to_glib_none().0);
         }
     }
 
