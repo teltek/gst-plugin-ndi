@@ -26,12 +26,12 @@ fn main() {
         "\"https://gitlab.freedesktop.org/gstreamer/gstreamer/issues/new\"",
     );
     build.extra_warnings(false);
-    build.define("GstAggregator", "GstAggregatorFallback");
-    build.define("GstAggregatorClass", "GstAggregatorFallbackClass");
-    build.define("GstAggregatorPrivate", "GstAggregatorFallbackPrivate");
-    build.define("GstAggregatorPad", "GstAggregatorFallbackPad");
-    build.define("GstAggregatorPadClass", "GstAggregatorFallbackPadClass");
-    build.define("GstAggregatorPadPrivate", "GstAggregatorFallbackPadPrivate");
+    build.define("GstAggregator", "GstAggregatorNdi");
+    build.define("GstAggregatorClass", "GstAggregatorNdiClass");
+    build.define("GstAggregatorPrivate", "GstAggregatorNdiPrivate");
+    build.define("GstAggregatorPad", "GstAggregatorNdiPad");
+    build.define("GstAggregatorPadClass", "GstAggregatorNdiPadClass");
+    build.define("GstAggregatorPadPrivate", "GstAggregatorNdiPadPrivate");
     build.define("GST_BASE_API", "G_GNUC_INTERNAL");
 
     build.compile("libgstaggregator-c.a");
