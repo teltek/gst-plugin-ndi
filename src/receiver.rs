@@ -2,6 +2,8 @@ use glib::prelude::*;
 use gst::prelude::*;
 use gst::{gst_debug, gst_error, gst_log, gst_trace, gst_warning};
 use gst_video::prelude::*;
+use gst_video::{VideoCaptionMeta};
+use gst_video_sys::{gst_buffer_add_video_caption_meta, GST_VIDEO_CAPTION_TYPE_CEA608_RAW};
 
 use byte_slice_cast::*;
 
@@ -9,6 +11,9 @@ use std::cmp;
 use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::thread;
+
+use std::ffi::CString;
+use once_cell::sync::Lazy;
 
 use super::*;
 
@@ -883,6 +888,30 @@ impl Receiver {
                 .get_mut()
                 .unwrap()
                 .set_flags(gst::BufferFlags::RESYNC);
+        }
+
+        let my_buffer: &mut gst::BufferRef = buffer.get_mut().unwrap();
+        match video_frame.metadata() {
+            Some(metadata_str) => {
+                let s1: String = metadata_str.to_string();
+                let mut length_of_s1 = 0;
+                for _b in s1.bytes() {
+                    length_of_s1 += 1;
+                }
+                let c_str_1 = CString::new(s1).expect("CString::new failed");
+                let view = c_str_1.as_ptr() as *const u8;
+                unsafe {
+                    gst_buffer_add_video_caption_meta(my_buffer.as_mut_ptr(), GST_VIDEO_CAPTION_TYPE_CEA608_RAW, view, length_of_s1);
+                }
+            }
+            None => {}
+        }
+
+        match my_buffer.meta::<VideoCaptionMeta>() {
+            Some(x) => {
+                gst_debug!(CAT, obj: element, "Received some VideoCaptionMeta [{:?}]", x);
+            }
+            None => {}
         }
 
         gst_log!(CAT, obj: element, "Produced video buffer {:?}", buffer);
