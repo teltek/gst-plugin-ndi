@@ -1,21 +1,23 @@
+#![allow(dead_code)]
+
 mod device_provider;
-pub mod ndi;
+mod ndi;
 
 #[cfg(feature = "sink-v1_14")]
 #[path = "base/mod.rs"]
-pub mod gst_base_compat;
+mod gst_base_compat;
 
 #[cfg(any(feature = "sink", feature = "sink-v1_14"))]
 mod ndisink;
 #[cfg(any(feature = "sink", feature = "sink-v1_14"))]
 mod ndisinkcombiner;
 #[cfg(any(feature = "sink", feature = "sink-v1_14"))]
-pub mod ndisinkmeta;
+mod ndisinkmeta;
 mod ndisrc;
 mod ndisrcdemux;
-pub mod ndisrcmeta;
-pub mod ndisys;
-pub mod receiver;
+mod ndisrcmeta;
+mod ndisys;
+mod receiver;
 
 use crate::ndi::*;
 use crate::ndisys::*;
