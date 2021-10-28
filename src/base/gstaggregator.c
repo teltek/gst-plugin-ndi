@@ -30,27 +30,46 @@
  * Control is given to the subclass when all pads have data.
  *
  *  * Base class for mixers and muxers. Subclasses should at least implement
- *    the #GstAggregatorClass.aggregate() virtual method.
+ *    the #GstAggregatorClass::aggregate virtual method.
  *
  *  * Installs a #GstPadChainFunction, a #GstPadEventFullFunction and a
  *    #GstPadQueryFunction to queue all serialized data packets per sink pad.
  *    Subclasses should not overwrite those, but instead implement
- *    #GstAggregatorClass.sink_event() and #GstAggregatorClass.sink_query() as
+ *    #GstAggregatorClass::sink_event and #GstAggregatorClass::sink_query as
  *    needed.
  *
  *  * When data is queued on all pads, the aggregate vmethod is called.
  *
  *  * One can peek at the data on any given GstAggregatorPad with the
- *    gst_aggregator_pad_peek_buffer () method, and remove it from the pad
+ *    gst_aggregator_pad_peek_buffer() method, and remove it from the pad
  *    with the gst_aggregator_pad_pop_buffer () method. When a buffer
  *    has been taken with pop_buffer (), a new buffer can be queued
  *    on that pad.
  *
+ *  * When gst_aggregator_pad_peek_buffer() or gst_aggregator_pad_has_buffer()
+ *    are called, a reference is taken to the returned buffer, which stays
+ *    valid until either:
+ *
+ *      - gst_aggregator_pad_pop_buffer() is called, in which case the caller
+ *        is guaranteed that the buffer they receive is the same as the peeked
+ *        buffer.
+ *      - gst_aggregator_pad_drop_buffer() is called, in which case the caller
+ *        is guaranteed that the dropped buffer is the one that was peeked.
+ *      - the subclass implementation of #GstAggregatorClass.aggregate returns.
+ *
+ *    Subsequent calls to gst_aggregator_pad_peek_buffer() or
+ *    gst_aggregator_pad_has_buffer() return / check the same buffer that was
+ *    returned / checked, until one of the conditions listed above is met.
+ *
+ *    Subclasses are only allowed to call these methods from the aggregate
+ *    thread.
+ *
  *  * If the subclass wishes to push a buffer downstream in its aggregate
  *    implementation, it should do so through the
- *    gst_aggregator_finish_buffer () method. This method will take care
+ *    gst_aggregator_finish_buffer() method. This method will take care
  *    of sending and ordering mandatory events such as stream start, caps
- *    and segment.
+ *    and segment. Buffer lists can also be pushed out with
+ *    gst_aggregator_finish_buffer_list().
  *
  *  * Same goes for EOS events, which should not be pushed directly by the
  *    subclass, it should instead return GST_FLOW_EOS in its aggregate
@@ -91,32 +110,25 @@
 
 #include "gstaggregator.h"
 
-typedef enum
-{
-  GST_AGGREGATOR_START_TIME_SELECTION_ZERO,
-  GST_AGGREGATOR_START_TIME_SELECTION_FIRST,
-  GST_AGGREGATOR_START_TIME_SELECTION_SET
-} GstAggregatorStartTimeSelection;
-
-static GType
+GType
 gst_aggregator_start_time_selection_get_type (void)
 {
   static GType gtype = 0;
 
-  if (gtype == 0) {
+  if (g_once_init_enter (&gtype)) {
     static const GEnumValue values[] = {
       {GST_AGGREGATOR_START_TIME_SELECTION_ZERO,
-          "Start at 0 running time (default)", "zero"},
+          "GST_AGGREGATOR_START_TIME_SELECTION_ZERO", "zero"},
       {GST_AGGREGATOR_START_TIME_SELECTION_FIRST,
-          "Start at first observed input running time", "first"},
+          "GST_AGGREGATOR_START_TIME_SELECTION_FIRST", "first"},
       {GST_AGGREGATOR_START_TIME_SELECTION_SET,
-          "Set start time with start-time property", "set"},
+          "GST_AGGREGATOR_START_TIME_SELECTION_SET", "set"},
       {0, NULL, NULL}
     };
+    GType new_type =
+        g_enum_register_static ("GstAggregatorStartTimeSelection", values);
 
-    gtype =
-        g_enum_register_static ("GstAggregatorFallbackStartTimeSelection",
-        values);
+    g_once_init_leave (&gtype, new_type);
   }
   return gtype;
 }
@@ -133,7 +145,7 @@ static GstClockTime gst_aggregator_get_latency_property (GstAggregator * agg);
 static GstClockTime gst_aggregator_get_latency_unlocked (GstAggregator * self);
 
 static void gst_aggregator_pad_buffer_consumed (GstAggregatorPad * pad,
-    GstBuffer * buffer);
+    GstBuffer * buffer, gboolean dequeued);
 
 GST_DEBUG_CATEGORY_STATIC (aggregator_debug);
 #define GST_CAT_DEFAULT aggregator_debug
@@ -245,6 +257,7 @@ struct _GstAggregatorPadPrivate
   GQueue data;                  /* buffers, events and queries */
   GstBuffer *clipped_buffer;
   guint num_buffers;
+  GstBuffer *peeked_buffer;
 
   /* used to track fill state of queues, only used with live-src and when
    * latency property is set to > 0 */
@@ -303,6 +316,31 @@ gst_aggregator_pad_flush (GstAggregatorPad * aggpad, GstAggregator * agg)
   return TRUE;
 }
 
+/**
+ * gst_aggregator_peek_next_sample:
+ *
+ * Use this function to determine what input buffers will be aggregated
+ * to produce the next output buffer. This should only be called from
+ * a #GstAggregator::samples-selected handler, and can be used to precisely
+ * control aggregating parameters for a given set of input samples.
+ *
+ * Returns: (nullable) (transfer full): The sample that is about to be aggregated. It may hold a #GstBuffer
+ *   or a #GstBufferList. The contents of its info structure is subclass-dependent,
+ *   and documented on a subclass basis. The buffers held by the sample are
+ *   not writable.
+ * Since: 1.18
+ */
+GstSample *
+gst_aggregator_peek_next_sample (GstAggregator * agg, GstAggregatorPad * aggpad)
+{
+  GstAggregatorClass *klass = GST_AGGREGATOR_GET_CLASS (agg);
+
+  if (klass->peek_next_sample)
+    return (klass->peek_next_sample (agg, aggpad));
+
+  return NULL;
+}
+
 /*************************************
  * GstAggregator implementation  *
  *************************************/
@@ -345,6 +383,7 @@ struct _GstAggregatorPrivate
 
   /* aggregate */
   GstClockID aggregate_id;      /* protected by src_lock */
+  gboolean selected_samples_called_or_warned;   /* protected by src_lock */
   GMutex src_lock;
   GCond src_cond;
 
@@ -360,6 +399,7 @@ struct _GstAggregatorPrivate
 
   /* properties */
   gint64 latency;               /* protected by both src_lock and all pad locks */
+  gboolean emit_signals;
 };
 
 /* Seek event forwarding helper */
@@ -379,6 +419,7 @@ typedef struct
 #define DEFAULT_MIN_UPSTREAM_LATENCY              0
 #define DEFAULT_START_TIME_SELECTION GST_AGGREGATOR_START_TIME_SELECTION_ZERO
 #define DEFAULT_START_TIME           (-1)
+#define DEFAULT_EMIT_SIGNALS         FALSE
 
 enum
 {
@@ -387,8 +428,17 @@ enum
   PROP_MIN_UPSTREAM_LATENCY,
   PROP_START_TIME_SELECTION,
   PROP_START_TIME,
+  PROP_EMIT_SIGNALS,
   PROP_LAST
 };
+
+enum
+{
+  SIGNAL_SAMPLES_SELECTED,
+  LAST_SIGNAL,
+};
+
+static guint gst_aggregator_signals[LAST_SIGNAL] = { 0 };
 
 static GstFlowReturn gst_aggregator_pad_chain_internal (GstAggregator * self,
     GstAggregatorPad * aggpad, GstBuffer * buffer, gboolean head);
@@ -643,6 +693,48 @@ gst_aggregator_finish_buffer (GstAggregator * aggregator, GstBuffer * buffer)
   return klass->finish_buffer (aggregator, buffer);
 }
 
+static GstFlowReturn
+gst_aggregator_default_finish_buffer_list (GstAggregator * self,
+    GstBufferList * bufferlist)
+{
+  gst_aggregator_push_mandatory_events (self);
+
+  GST_OBJECT_LOCK (self);
+  if (!self->priv->flushing && gst_pad_is_active (self->srcpad)) {
+    GST_TRACE_OBJECT (self, "pushing bufferlist%" GST_PTR_FORMAT, bufferlist);
+    GST_OBJECT_UNLOCK (self);
+    return gst_pad_push_list (self->srcpad, bufferlist);
+  } else {
+    GST_INFO_OBJECT (self, "Not pushing (active: %i, flushing: %i)",
+        self->priv->flushing, gst_pad_is_active (self->srcpad));
+    GST_OBJECT_UNLOCK (self);
+    gst_buffer_list_unref (bufferlist);
+    return GST_FLOW_OK;
+  }
+}
+
+/**
+ * gst_aggregator_finish_buffer_list:
+ * @aggregator: The #GstAggregator
+ * @bufferlist: (transfer full): the #GstBufferList to push.
+ *
+ * This method will push the provided output buffer list downstream. If needed,
+ * mandatory events such as stream-start, caps, and segment events will be
+ * sent before pushing the buffer.
+ *
+ * Since: 1.18
+ */
+GstFlowReturn
+gst_aggregator_finish_buffer_list (GstAggregator * aggregator,
+    GstBufferList * bufferlist)
+{
+  GstAggregatorClass *klass = GST_AGGREGATOR_GET_CLASS (aggregator);
+
+  g_assert (klass->finish_buffer_list != NULL);
+
+  return klass->finish_buffer_list (aggregator, bufferlist);
+}
+
 static void
 gst_aggregator_push_eos (GstAggregator * self)
 {
@@ -828,8 +920,6 @@ gst_aggregator_do_events_and_queries (GstElement * self, GstPad * epad,
         PAD_LOCK (pad);
         if (GST_EVENT_TYPE (event) == GST_EVENT_CAPS) {
           pad->priv->negotiated = ret;
-          if (!ret)
-            pad->priv->flow_return = data->flow_ret = GST_FLOW_NOT_NEGOTIATED;
         }
         if (g_queue_peek_tail (&pad->priv->data) == event)
           gst_event_unref (g_queue_pop_tail (&pad->priv->data));
@@ -871,27 +961,44 @@ gst_aggregator_pad_skip_buffers (GstElement * self, GstPad * epad,
 
   PAD_LOCK (aggpad);
 
-  item = g_queue_peek_head_link (&aggpad->priv->data);
+  item = g_queue_peek_tail_link (&aggpad->priv->data);
   while (item) {
-    GList *next = item->next;
+    GList *prev = item->prev;
 
     if (GST_IS_BUFFER (item->data)
         && klass->skip_buffer (aggpad, agg, item->data)) {
       GST_LOG_OBJECT (aggpad, "Skipping %" GST_PTR_FORMAT, item->data);
-      gst_aggregator_pad_buffer_consumed (aggpad, GST_BUFFER (item->data));
+      gst_aggregator_pad_buffer_consumed (aggpad, GST_BUFFER (item->data),
+          TRUE);
       gst_buffer_unref (item->data);
       g_queue_delete_link (&aggpad->priv->data, item);
     } else {
       break;
     }
 
-    item = next;
+    item = prev;
   }
 
   PAD_UNLOCK (aggpad);
 
   return TRUE;
 }
+
+static gboolean
+gst_aggregator_pad_reset_peeked_buffer (GstElement * self, GstPad * epad,
+    gpointer user_data)
+{
+  GstAggregatorPad *aggpad = (GstAggregatorPad *) epad;
+
+  PAD_LOCK (aggpad);
+
+  gst_buffer_replace (&aggpad->priv->peeked_buffer, NULL);
+
+  PAD_UNLOCK (aggpad);
+
+  return TRUE;
+}
+
 
 static void
 gst_aggregator_pad_set_flushing (GstAggregatorPad * aggpad,
@@ -957,7 +1064,7 @@ gst_aggregator_default_negotiated_src_caps (GstAggregator * agg, GstCaps * caps)
 static gboolean
 gst_aggregator_set_allocation (GstAggregator * self,
     GstBufferPool * pool, GstAllocator * allocator,
-    GstAllocationParams * params, GstQuery * query)
+    const GstAllocationParams * params, GstQuery * query)
 {
   GstAllocator *oldalloc;
   GstBufferPool *oldpool;
@@ -1175,7 +1282,7 @@ gst_aggregator_negotiate_unlocked (GstAggregator * self)
  *
  * Negotiates src pad caps with downstream elements.
  * Unmarks GST_PAD_FLAG_NEED_RECONFIGURE in any case. But marks it again
- * if #GstAggregatorClass.negotiate() fails.
+ * if #GstAggregatorClass::negotiate fails.
  *
  * Returns: %TRUE if the negotiation succeeded, else %FALSE.
  *
@@ -1227,8 +1334,11 @@ gst_aggregator_aggregate_func (GstAggregator * self)
 
     /* Ensure we have buffers ready (either in clipped_buffer or at the head of
      * the queue */
-    if (!gst_aggregator_wait_and_check (self, &timeout))
+    if (!gst_aggregator_wait_and_check (self, &timeout)) {
+      gst_element_foreach_sink_pad (GST_ELEMENT_CAST (self),
+          gst_aggregator_pad_reset_peeked_buffer, NULL);
       continue;
+    }
 
     if (gst_pad_check_reconfigure (GST_AGGREGATOR_SRC_PAD (self))) {
       if (!gst_aggregator_negotiate_unlocked (self)) {
@@ -1244,6 +1354,16 @@ gst_aggregator_aggregate_func (GstAggregator * self)
     if (timeout || flow_return >= GST_FLOW_OK) {
       GST_TRACE_OBJECT (self, "Actually aggregating!");
       flow_return = klass->aggregate (self, timeout);
+    }
+
+    gst_element_foreach_sink_pad (GST_ELEMENT_CAST (self),
+        gst_aggregator_pad_reset_peeked_buffer, NULL);
+
+    if (!priv->selected_samples_called_or_warned) {
+      GST_FIXME_OBJECT (self,
+          "Subclass should call gst_aggregator_selected_samples() from its "
+          "aggregate implementation.");
+      priv->selected_samples_called_or_warned = TRUE;
     }
 
     if (flow_return == GST_AGGREGATOR_FLOW_NEED_DATA)
@@ -1299,6 +1419,10 @@ gst_aggregator_start (GstAggregator * self)
   self->priv->send_segment = TRUE;
   self->priv->send_eos = TRUE;
   self->priv->srccaps = NULL;
+
+  self->priv->has_peer_latency = FALSE;
+  self->priv->peer_latency_live = FALSE;
+  self->priv->peer_latency_min = self->priv->peer_latency_max = 0;
 
   gst_aggregator_set_allocation (self, NULL, NULL, NULL, NULL);
 
@@ -1754,6 +1878,13 @@ gst_aggregator_change_state (GstElement * element, GstStateChange transition)
       if (!gst_aggregator_start (self))
         goto error_start;
       break;
+    case GST_STATE_CHANGE_PAUSED_TO_PLAYING:
+      /* Wake up any waiting as now we have a clock and can do
+       * proper waiting on the clock if necessary */
+      SRC_LOCK (self);
+      SRC_BROADCAST (self);
+      SRC_UNLOCK (self);
+      break;
     default:
       break;
   }
@@ -1770,6 +1901,13 @@ gst_aggregator_change_state (GstElement * element, GstStateChange transition)
         /* What to do in this case? Error out? */
         GST_ERROR_OBJECT (self, "Subclass failed to stop.");
       }
+      break;
+    case GST_STATE_CHANGE_PLAYING_TO_PAUSED:
+      /* Wake up any waiting as now clock might be gone and we might
+       * need to wait on the condition variable again */
+      SRC_LOCK (self);
+      SRC_BROADCAST (self);
+      SRC_UNLOCK (self);
       break;
     default:
       break;
@@ -1800,6 +1938,7 @@ gst_aggregator_release_pad (GstElement * element, GstPad * pad)
 
   SRC_LOCK (self);
   gst_aggregator_pad_set_flushing (aggpad, GST_FLOW_FLUSHING, TRUE);
+  gst_buffer_replace (&aggpad->priv->peeked_buffer, NULL);
   gst_element_remove_pad (element, pad);
 
   self->priv->has_peer_latency = FALSE;
@@ -1896,7 +2035,7 @@ gst_aggregator_request_new_pad (GstElement * element,
   return GST_PAD (agg_pad);
 }
 
-/* Must be called with SRC_LOCK held */
+/* Must be called with SRC_LOCK held, temporarily releases it! */
 
 static gboolean
 gst_aggregator_query_latency_unlocked (GstAggregator * self, GstQuery * query)
@@ -1904,7 +2043,10 @@ gst_aggregator_query_latency_unlocked (GstAggregator * self, GstQuery * query)
   gboolean query_ret, live;
   GstClockTime our_latency, min, max;
 
+  /* Temporarily release the lock to do the query. */
+  SRC_UNLOCK (self);
   query_ret = gst_pad_query_default (self->srcpad, GST_OBJECT (self), query);
+  SRC_LOCK (self);
 
   if (!query_ret) {
     GST_WARNING_OBJECT (self, "Latency query failed");
@@ -1930,10 +2072,12 @@ gst_aggregator_query_latency_unlocked (GstAggregator * self, GstQuery * query)
   }
 
   if (min > max && GST_CLOCK_TIME_IS_VALID (max)) {
+    SRC_UNLOCK (self);
     GST_ELEMENT_WARNING (self, CORE, CLOCK, (NULL),
         ("Impossible to configure latency: max %" GST_TIME_FORMAT " < min %"
             GST_TIME_FORMAT ". Add queues or other buffering elements.",
             GST_TIME_ARGS (max), GST_TIME_ARGS (min)));
+    SRC_LOCK (self);
     return FALSE;
   }
 
@@ -1964,7 +2108,8 @@ gst_aggregator_query_latency_unlocked (GstAggregator * self, GstQuery * query)
 }
 
 /*
- * MUST be called with the src_lock held.
+ * MUST be called with the src_lock held. Temporarily releases the lock inside
+ * gst_aggregator_query_latency_unlocked() to do the actual query!
  *
  * See  gst_aggregator_get_latency() for doc
  */
@@ -2515,6 +2660,9 @@ gst_aggregator_set_property (GObject * object, guint prop_id,
     case PROP_START_TIME:
       agg->priv->start_time = g_value_get_uint64 (value);
       break;
+    case PROP_EMIT_SIGNALS:
+      agg->priv->emit_signals = g_value_get_boolean (value);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -2542,6 +2690,9 @@ gst_aggregator_get_property (GObject * object, guint prop_id,
     case PROP_START_TIME:
       g_value_set_uint64 (value, agg->priv->start_time);
       break;
+    case PROP_EMIT_SIGNALS:
+      g_value_set_boolean (value, agg->priv->emit_signals);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -2564,6 +2715,7 @@ gst_aggregator_class_init (GstAggregatorClass * klass)
     g_type_class_adjust_private_offset (klass, &aggregator_private_offset);
 
   klass->finish_buffer = gst_aggregator_default_finish_buffer;
+  klass->finish_buffer_list = gst_aggregator_default_finish_buffer_list;
 
   klass->sink_event = gst_aggregator_default_sink_event;
   klass->sink_query = gst_aggregator_default_sink_query;
@@ -2633,6 +2785,40 @@ gst_aggregator_class_init (GstAggregatorClass * klass)
           "Start time to use if start-time-selection=set", 0,
           G_MAXUINT64,
           DEFAULT_START_TIME, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  /**
+   * GstAggregator:emit-signals:
+   *
+   * Enables the emission of signals such as #GstAggregator::samples-selected
+   *
+   * Since: 1.18
+   */
+  g_object_class_install_property (gobject_class, PROP_EMIT_SIGNALS,
+      g_param_spec_boolean ("emit-signals", "Emit signals",
+          "Send signals", DEFAULT_EMIT_SIGNALS,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  /**
+   * GstAggregator::samples-selected:
+   * @aggregator: The #GstAggregator that emitted the signal
+   * @segment: The #GstSegment the next output buffer is part of
+   * @pts: The presentation timestamp of the next output buffer
+   * @dts: The decoding timestamp of the next output buffer
+   * @duration: The duration of the next output buffer
+   * @info: (nullable): a #GstStructure containing additional information
+   *
+   * Signals that the #GstAggregator subclass has selected the next set
+   * of input samples it will aggregate. Handlers may call
+   * gst_aggregator_peek_next_sample() at that point.
+   *
+   * Since: 1.18
+   */
+  gst_aggregator_signals[SIGNAL_SAMPLES_SELECTED] =
+      g_signal_new ("samples-selected", G_TYPE_FROM_CLASS (klass),
+      G_SIGNAL_RUN_FIRST, 0, NULL, NULL, NULL, G_TYPE_NONE, 5,
+      GST_TYPE_SEGMENT | G_SIGNAL_TYPE_STATIC_SCOPE, GST_TYPE_CLOCK_TIME,
+      GST_TYPE_CLOCK_TIME, GST_TYPE_CLOCK_TIME,
+      GST_TYPE_STRUCTURE | G_SIGNAL_TYPE_STATIC_SCOPE);
 }
 
 static inline gpointer
@@ -2717,7 +2903,7 @@ gst_aggregator_get_type (void)
     };
 
     _type = g_type_register_static (GST_TYPE_ELEMENT,
-        "GstAggregatorFallback", &info, G_TYPE_FLAG_ABSTRACT);
+        "GstAggregator", &info, G_TYPE_FLAG_ABSTRACT);
 
     aggregator_private_offset =
         g_type_add_instance_private (_type, sizeof (GstAggregatorPrivate));
@@ -2731,6 +2917,8 @@ gst_aggregator_get_type (void)
 static gboolean
 gst_aggregator_pad_has_space (GstAggregator * self, GstAggregatorPad * aggpad)
 {
+  guint64 max_time_level;
+
   /* Empty queue always has space */
   if (aggpad->priv->num_buffers == 0 && aggpad->priv->clipped_buffer == NULL)
     return TRUE;
@@ -2744,8 +2932,13 @@ gst_aggregator_pad_has_space (GstAggregator * self, GstAggregatorPad * aggpad)
   if (self->priv->latency == 0)
     return FALSE;
 
+  /* On top of our latency, we also want to allow buffering up to the
+   * minimum upstream latency to allow queue free sources with lower then
+   * upstream latency. */
+  max_time_level = self->priv->latency + self->priv->upstream_latency_min;
+
   /* Allow no more buffers than the latency */
-  return (aggpad->priv->time_level <= self->priv->latency);
+  return (aggpad->priv->time_level <= max_time_level);
 }
 
 /* Must be called with the PAD_LOCK held */
@@ -3007,6 +3200,7 @@ gst_aggregator_pad_finalize (GObject * object)
 {
   GstAggregatorPad *pad = (GstAggregatorPad *) object;
 
+  gst_buffer_replace (&pad->priv->peeked_buffer, NULL);
   g_cond_clear (&pad->priv->event_cond);
   g_mutex_clear (&pad->priv->flush_lock);
   g_mutex_clear (&pad->priv->lock);
@@ -3069,6 +3263,7 @@ gst_aggregator_pad_class_init (GstAggregatorPadClass * klass)
 
   /**
    * GstAggregatorPad:buffer-consumed:
+   * @aggregator: The #GstAggregator that emitted the signal
    * @buffer: The buffer that was consumed
    *
    * Signals that a buffer was consumed. As aggregator pads store buffers
@@ -3113,10 +3308,12 @@ gst_aggregator_pad_init (GstAggregatorPad * pad)
 
 /* Must be called with the PAD_LOCK held */
 static void
-gst_aggregator_pad_buffer_consumed (GstAggregatorPad * pad, GstBuffer * buffer)
+gst_aggregator_pad_buffer_consumed (GstAggregatorPad * pad, GstBuffer * buffer,
+    gboolean dequeued)
 {
-  pad->priv->num_buffers--;
-  GST_TRACE_OBJECT (pad, "Consuming buffer %" GST_PTR_FORMAT, buffer);
+  if (dequeued)
+    pad->priv->num_buffers--;
+
   if (buffer && pad->priv->emit_signals) {
     g_signal_emit (pad, gst_aggregator_pad_signals[PAD_SIGNAL_BUFFER_CONSUMED],
         0, buffer);
@@ -3157,7 +3354,7 @@ gst_aggregator_pad_clip_buffer_unlocked (GstAggregatorPad * pad)
       buffer = aggclass->clip (self, pad, buffer);
 
       if (buffer == NULL) {
-        gst_aggregator_pad_buffer_consumed (pad, buffer);
+        gst_aggregator_pad_buffer_consumed (pad, buffer, TRUE);
         GST_TRACE_OBJECT (pad, "Clipping consumed the buffer");
       }
     }
@@ -3175,28 +3372,50 @@ gst_aggregator_pad_clip_buffer_unlocked (GstAggregatorPad * pad)
  *
  * Steal the ref to the buffer currently queued in @pad.
  *
- * Returns: (transfer full): The buffer in @pad or NULL if no buffer was
+ * Returns: (nullable) (transfer full): The buffer in @pad or NULL if no buffer was
  *   queued. You should unref the buffer after usage.
  */
 GstBuffer *
 gst_aggregator_pad_pop_buffer (GstAggregatorPad * pad)
 {
-  GstBuffer *buffer;
+  GstBuffer *buffer = NULL;
 
   PAD_LOCK (pad);
 
-  if (pad->priv->flow_return != GST_FLOW_OK) {
-    PAD_UNLOCK (pad);
-    return NULL;
+  /* If the subclass has already peeked a buffer, we guarantee
+   * that it receives the same buffer, no matter if the pad has
+   * errored out / been flushed in the meantime.
+   */
+  if (pad->priv->peeked_buffer) {
+    buffer = pad->priv->peeked_buffer;
+    goto done;
   }
 
-  gst_aggregator_pad_clip_buffer_unlocked (pad);
+  if (pad->priv->flow_return != GST_FLOW_OK)
+    goto done;
 
+  gst_aggregator_pad_clip_buffer_unlocked (pad);
   buffer = pad->priv->clipped_buffer;
 
+done:
   if (buffer) {
-    pad->priv->clipped_buffer = NULL;
-    gst_aggregator_pad_buffer_consumed (pad, buffer);
+    if (pad->priv->clipped_buffer != NULL) {
+      /* Here we still hold a reference to both the clipped buffer
+       * and possibly the peeked buffer, we transfer the first and
+       * potentially release the second
+       */
+      gst_aggregator_pad_buffer_consumed (pad, buffer, TRUE);
+      pad->priv->clipped_buffer = NULL;
+      gst_buffer_replace (&pad->priv->peeked_buffer, NULL);
+    } else {
+      /* Here our clipped buffer has already been released, for
+       * example because of a flush. We thus transfer the reference
+       * to the peeked buffer to the caller, and we don't decrement
+       * pad.num_buffers as it has already been done elsewhere
+       */
+      gst_aggregator_pad_buffer_consumed (pad, buffer, FALSE);
+      pad->priv->peeked_buffer = NULL;
+    }
     GST_DEBUG_OBJECT (pad, "Consumed: %" GST_PTR_FORMAT, buffer);
   }
 
@@ -3231,31 +3450,36 @@ gst_aggregator_pad_drop_buffer (GstAggregatorPad * pad)
  * gst_aggregator_pad_peek_buffer:
  * @pad: the pad to get buffer from
  *
- * Returns: (transfer full): A reference to the buffer in @pad or
+ * Returns: (nullable) (transfer full): A reference to the buffer in @pad or
  * NULL if no buffer was queued. You should unref the buffer after
  * usage.
  */
 GstBuffer *
 gst_aggregator_pad_peek_buffer (GstAggregatorPad * pad)
 {
-  GstBuffer *buffer;
+  GstBuffer *buffer = NULL;
 
   PAD_LOCK (pad);
 
-  if (pad->priv->flow_return != GST_FLOW_OK) {
-    PAD_UNLOCK (pad);
-    return NULL;
+  if (pad->priv->peeked_buffer) {
+    buffer = gst_buffer_ref (pad->priv->peeked_buffer);
+    goto done;
   }
+
+  if (pad->priv->flow_return != GST_FLOW_OK)
+    goto done;
 
   gst_aggregator_pad_clip_buffer_unlocked (pad);
 
   if (pad->priv->clipped_buffer) {
     buffer = gst_buffer_ref (pad->priv->clipped_buffer);
+    pad->priv->peeked_buffer = gst_buffer_ref (buffer);
   } else {
     buffer = NULL;
   }
-  PAD_UNLOCK (pad);
 
+done:
+  PAD_UNLOCK (pad);
   return buffer;
 }
 
@@ -3277,8 +3501,15 @@ gst_aggregator_pad_has_buffer (GstAggregatorPad * pad)
   gboolean has_buffer;
 
   PAD_LOCK (pad);
-  gst_aggregator_pad_clip_buffer_unlocked (pad);
-  has_buffer = (pad->priv->clipped_buffer != NULL);
+
+  if (pad->priv->peeked_buffer) {
+    has_buffer = TRUE;
+  } else {
+    gst_aggregator_pad_clip_buffer_unlocked (pad);
+    has_buffer = (pad->priv->clipped_buffer != NULL);
+    if (has_buffer)
+      pad->priv->peeked_buffer = gst_buffer_ref (pad->priv->clipped_buffer);
+  }
   PAD_UNLOCK (pad);
 
   return has_buffer;
@@ -3383,7 +3614,7 @@ gst_aggregator_set_latency (GstAggregator * self,
  * gst_aggregator_get_buffer_pool:
  * @self: a #GstAggregator
  *
- * Returns: (transfer full): the instance of the #GstBufferPool used
+ * Returns: (transfer full) (nullable): the instance of the #GstBufferPool used
  * by @trans; free it after use it
  */
 GstBufferPool *
@@ -3405,9 +3636,9 @@ gst_aggregator_get_buffer_pool (GstAggregator * self)
 /**
  * gst_aggregator_get_allocator:
  * @self: a #GstAggregator
- * @allocator: (out) (allow-none) (transfer full): the #GstAllocator
+ * @allocator: (out) (optional) (nullable) (transfer full): the #GstAllocator
  * used
- * @params: (out) (allow-none) (transfer full): the
+ * @params: (out caller-allocates) (optional): the
  * #GstAllocationParams of @allocator
  *
  * Lets #GstAggregator sub-classes get the memory @allocator
@@ -3433,7 +3664,7 @@ gst_aggregator_get_allocator (GstAggregator * self,
  * gst_aggregator_simple_get_next_time:
  * @self: A #GstAggregator
  *
- * This is a simple #GstAggregatorClass.get_next_time() implementation that
+ * This is a simple #GstAggregatorClass::get_next_time implementation that
  * just looks at the #GstSegment on the srcpad of the aggregator and bases
  * the next time on the running time there.
  *
@@ -3473,10 +3704,13 @@ gst_aggregator_simple_get_next_time (GstAggregator * self)
  * source pad, instead of directly pushing new segment events
  * downstream.
  *
+ * Subclasses MUST call this before gst_aggregator_selected_samples(),
+ * if it is used at all.
+ *
  * Since: 1.18
  */
 void
-gst_aggregator_update_segment (GstAggregator * self, GstSegment * segment)
+gst_aggregator_update_segment (GstAggregator * self, const GstSegment * segment)
 {
   g_return_if_fail (GST_IS_AGGREGATOR (self));
   g_return_if_fail (segment != NULL);
@@ -3487,5 +3721,44 @@ gst_aggregator_update_segment (GstAggregator * self, GstSegment * segment)
   GST_OBJECT_LOCK (self);
   GST_AGGREGATOR_PAD (self->srcpad)->segment = *segment;
   self->priv->send_segment = TRUE;
+  /* we have a segment from the subclass now and really shouldn't override
+   * anything in that segment anymore, like the segment.position */
+  self->priv->first_buffer = FALSE;
   GST_OBJECT_UNLOCK (self);
+}
+
+/**
+ * gst_aggregator_selected_samples:
+ * @pts: The presentation timestamp of the next output buffer
+ * @dts: The decoding timestamp of the next output buffer
+ * @duration: The duration of the next output buffer
+ * @info: (nullable): a #GstStructure containing additional information
+ *
+ * Subclasses should call this when they have prepared the
+ * buffers they will aggregate for each of their sink pads, but
+ * before using any of the properties of the pads that govern
+ * *how* aggregation should be performed, for example z-index
+ * for video aggregators.
+ *
+ * If gst_aggregator_update_segment() is used by the subclass,
+ * it MUST be called before gst_aggregator_selected_samples().
+ *
+ * This function MUST only be called from the #GstAggregatorClass::aggregate()
+ * function.
+ *
+ * Since: 1.18
+ */
+void
+gst_aggregator_selected_samples (GstAggregator * self,
+    GstClockTime pts, GstClockTime dts, GstClockTime duration,
+    GstStructure * info)
+{
+  g_return_if_fail (GST_IS_AGGREGATOR (self));
+
+  if (self->priv->emit_signals) {
+    g_signal_emit (self, gst_aggregator_signals[SIGNAL_SAMPLES_SELECTED], 0,
+        &GST_AGGREGATOR_PAD (self->srcpad)->segment, pts, dts, duration, info);
+  }
+
+  self->priv->selected_samples_called_or_warned = TRUE;
 }

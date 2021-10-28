@@ -1,11 +1,10 @@
 // Take a look at the license at the top of the repository in the LICENSE file.
 
 use super::ffi;
-use super::AggregatorPad;
 
-use glib::object::IsA;
+use super::AggregatorPad;
+use glib::prelude::*;
 use glib::translate::*;
-use gst::glib;
 
 pub trait AggregatorPadExtManual: 'static {
     #[doc(alias = "get_segment")]

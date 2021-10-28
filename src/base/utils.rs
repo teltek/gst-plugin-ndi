@@ -1,9 +1,9 @@
 // Take a look at the license at the top of the repository in the LICENSE file.
 
 use glib::translate::mut_override;
-use gst::glib;
 
 #[must_use = "if unused the Mutex will immediately unlock"]
+#[doc(alias = "GMutex")]
 pub struct MutexGuard<'a>(&'a glib::ffi::GMutex);
 
 impl<'a> MutexGuard<'a> {

@@ -96,7 +96,19 @@ pub struct GstAggregatorClass {
             *mut gst::GstQuery,
         ) -> gboolean,
     >,
-    pub _gst_reserved: [gpointer; 17],
+    pub finish_buffer_list: Option<
+        unsafe extern "C" fn(
+	    *mut GstAggregator,
+	    *mut gst::GstBufferList
+	) -> gst::GstFlowReturn
+    >,
+    pub peek_next_sample: Option<
+        unsafe extern "C" fn(
+            *mut GstAggregator,
+            *mut GstAggregatorPad,
+        ) -> *mut gst::GstSample,
+    >,
+    pub _gst_reserved: [gpointer; 15],
 }
 
 impl ::std::fmt::Debug for GstAggregatorClass {
@@ -121,6 +133,8 @@ impl ::std::fmt::Debug for GstAggregatorClass {
             .field("negotiated_src_caps", &self.negotiated_src_caps)
             .field("decide_allocation", &self.decide_allocation)
             .field("propose_allocation", &self.propose_allocation)
+            .field("finish_buffer_list", &self.finish_buffer_list)
+            .field("peek_next_sample", &self.peek_next_sample)
             .finish()
     }
 }
@@ -198,6 +212,12 @@ impl ::std::fmt::Debug for GstAggregatorPad {
     }
 }
 
+// Enums
+pub type GstAggregatorStartTimeSelection = c_int;
+pub const GST_AGGREGATOR_START_TIME_SELECTION_ZERO: GstAggregatorStartTimeSelection = 0;
+pub const GST_AGGREGATOR_START_TIME_SELECTION_FIRST: GstAggregatorStartTimeSelection = 1;
+pub const GST_AGGREGATOR_START_TIME_SELECTION_SET: GstAggregatorStartTimeSelection = 2;
+
 extern "C" {
     //=========================================================================
     // GstAggregator
@@ -206,6 +226,10 @@ extern "C" {
     pub fn gst_aggregator_finish_buffer(
         aggregator: *mut GstAggregator,
         buffer: *mut gst::GstBuffer,
+    ) -> gst::GstFlowReturn;
+    pub fn gst_aggregator_finish_buffer_list(
+        aggregator: *mut GstAggregator,
+        buffer: *mut gst::GstBufferList,
     ) -> gst::GstFlowReturn;
     pub fn gst_aggregator_negotiate(aggregator: *mut GstAggregator) -> gboolean;
     pub fn gst_aggregator_get_allocator(
@@ -223,6 +247,17 @@ extern "C" {
     pub fn gst_aggregator_set_src_caps(self_: *mut GstAggregator, caps: *mut gst::GstCaps);
     pub fn gst_aggregator_simple_get_next_time(self_: *mut GstAggregator) -> gst::GstClockTime;
     pub fn gst_aggregator_update_segment(self_: *mut GstAggregator, segment: *const gst::GstSegment);
+    pub fn gst_aggregator_peek_next_sample(
+	self_: *mut GstAggregator,
+	aggregator_pad: *mut GstAggregatorPad,
+    ) -> *mut gst::GstSample;
+    pub fn gst_aggregator_selected_samples (
+	self_: *mut GstAggregator,
+        pts: gst::GstClockTime,
+        dts: gst::GstClockTime,
+        duration: gst::GstClockTime,
+        info: *mut gst::GstStructure
+    );
 
     //=========================================================================
     // GstAggregatorPad
@@ -233,4 +268,10 @@ extern "C" {
     pub fn gst_aggregator_pad_is_eos(pad: *mut GstAggregatorPad) -> gboolean;
     pub fn gst_aggregator_pad_peek_buffer(pad: *mut GstAggregatorPad) -> *mut gst::GstBuffer;
     pub fn gst_aggregator_pad_pop_buffer(pad: *mut GstAggregatorPad) -> *mut gst::GstBuffer;
+
+    //=========================================================================
+    // GstAggregatorStartTimeSelection
+    //=========================================================================
+    pub fn gst_aggregator_start_time_selection_get_type() -> GType;
 }
+

@@ -2,9 +2,9 @@
 
 use super::super::ffi;
 
+use glib::prelude::*;
 use glib::translate::*;
-use gst::glib;
-use gst::prelude::*;
+
 use gst::subclass::prelude::*;
 
 use super::super::Aggregator;
