@@ -804,7 +804,7 @@ impl<'a> VideoFrame<'a> {
             picture_aspect_ratio,
             frame_format_type,
             timecode,
-            p_data: frame.plane_data(0).unwrap().as_ptr() as *const i8,
+            p_data: frame.plane_data(0).unwrap().as_ptr() as *const u8,
             line_stride_or_data_size_in_bytes: frame.plane_stride()[0],
             p_metadata: ptr::null(),
             timestamp: 0,
