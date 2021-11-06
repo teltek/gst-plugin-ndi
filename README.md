@@ -52,7 +52,25 @@ export GST_PLUGIN_PATH=`pwd`/target/debug
 gst-inspect-1.0 ndi
 ```
 
-By defult GStreamer 1.16 is required, to use only GStreamer 1.12 instead of 1.16, pass `--disable-default-features` to cargo. Only a subset of video formats is supported with this GStreamer version.
+By default, GStreamer 1.18 is required to build the project entirely. Some elements support lower GStreamer versions, as shown in the following table.
+
+| Element              | Required GStreamer Version |
+|----------------------|----------------------------|
+| src                  | v1.12                      |
+| interlaced-fields    | v1.16                      |
+| reference-timestamps | v1.14                      |
+| sink                 | v1.18, v1.14*              |
+
+To build the `src` element, pass the `--no-default-features` flag. Only a subset of video formats is supported with this GStreamer version. To build any of the other elements independently, specify them as features. For example, to build the sink element, pass it as:
+```
+cargo build --no-default-features --features="sink"
+```
+Multiple elements may be built if separated by commas (`--features="sink,reference-timestamps"`).
+
+There is a backport of the sink element for GStreamer 1.14. In order to build the backport, use the following special feature:
+```
+cargo build --no-default-features --features="sink-v1_14"
+```
 
 If all went ok, you should see info related to the NDI element. To make the plugin available without using `GST_PLUGIN_PATH` it's necessary to copy the plugin to the gstreamer plugins folder.
 

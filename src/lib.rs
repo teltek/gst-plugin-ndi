@@ -1,16 +1,23 @@
+#![allow(dead_code)]
+
 mod device_provider;
-pub mod ndi;
-#[cfg(feature = "sink")]
+mod ndi;
+
+#[cfg(feature = "sink-v1_14")]
+#[path = "base/mod.rs"]
+mod gst_base_compat;
+
+#[cfg(any(feature = "sink", feature = "sink-v1_14"))]
 mod ndisink;
-#[cfg(feature = "sink")]
+#[cfg(any(feature = "sink", feature = "sink-v1_14"))]
 mod ndisinkcombiner;
-#[cfg(feature = "sink")]
-pub mod ndisinkmeta;
+#[cfg(any(feature = "sink", feature = "sink-v1_14"))]
+mod ndisinkmeta;
 mod ndisrc;
 mod ndisrcdemux;
-pub mod ndisrcmeta;
-pub mod ndisys;
-pub mod receiver;
+mod ndisrcmeta;
+mod ndisys;
+mod receiver;
 
 use crate::ndi::*;
 use crate::ndisys::*;
@@ -123,7 +130,7 @@ fn plugin_init(plugin: &gst::Plugin) -> Result<(), glib::BoolError> {
     ndisrc::register(plugin)?;
     ndisrcdemux::register(plugin)?;
 
-    #[cfg(feature = "sink")]
+    #[cfg(any(feature = "sink", feature = "sink-v1_14"))]
     {
         ndisinkcombiner::register(plugin)?;
         ndisink::register(plugin)?;

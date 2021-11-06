@@ -1,5 +1,8 @@
 use glib::prelude::*;
 
+#[cfg(feature = "sink-v1_14")]
+use crate::gst_base_compat as gst_base;
+
 mod imp;
 
 glib::wrapper! {

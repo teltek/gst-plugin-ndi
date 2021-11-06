@@ -3,8 +3,18 @@ use glib::subclass::prelude::*;
 use gst::prelude::*;
 use gst::subclass::prelude::*;
 use gst::{gst_debug, gst_error, gst_trace, gst_warning};
+
+#[cfg(not(feature = "sink-v1_14"))]
 use gst_base::prelude::*;
+#[cfg(not(feature = "sink-v1_14"))]
 use gst_base::subclass::prelude::*;
+
+#[cfg(feature = "sink-v1_14")]
+use self::gst_base::prelude::*;
+#[cfg(feature = "sink-v1_14")]
+use self::gst_base::subclass::prelude::*;
+#[cfg(feature = "sink-v1_14")]
+use crate::gst_base_compat as gst_base;
 
 use once_cell::sync::Lazy;
 

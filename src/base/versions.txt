@@ -1,0 +1,4 @@
+Backported from:
+gstreamer (https://gitlab.freedesktop.org/gstreamer/gstreamer @ 1.19.2)
+gstreamer-rs (https://gitlab.freedesktop.org/gstreamer/gstreamer-rs @ 0.17.4)
+
