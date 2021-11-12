@@ -52,7 +52,8 @@ export GST_PLUGIN_PATH=`pwd`/target/debug
 gst-inspect-1.0 ndi
 ```
 
-By defult GStreamer 1.16 is required, to use only GStreamer 1.12 instead of 1.16, pass `--disable-default-features` to cargo. Only a subset of video formats is supported with this GStreamer version.
+By default GStreamer 1.18 is required, to use an older version. You can build with `$ cargo build --no-default-features --features whatever_you_want_to_enable_of_the_above_features`
+      
 
 If all went ok, you should see info related to the NDI element. To make the plugin available without using `GST_PLUGIN_PATH` it's necessary to copy the plugin to the gstreamer plugins folder.
 
