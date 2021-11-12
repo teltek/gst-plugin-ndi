@@ -1,27 +1,28 @@
 GStreamer NDI Plugin for Linux
 ====================
 
-*Compiled and tested with NDI SDK 3.5, 3.8, 4.0 and 4.1*
+*Compiled and tested with NDI SDK 4.0, 4.1 and 5.0*
 
 This is a plugin for the [GStreamer](https://gstreamer.freedesktop.org/) multimedia framework that allows GStreamer to receive a stream from a [NDI](https://www.newtek.com/ndi/) source. This plugin has been developed by [Teltek](http://teltek.es/) and was funded by the [University of the Arts London](https://www.arts.ac.uk/) and [The University of Manchester](https://www.manchester.ac.uk/).
 
-Currently the plugin has two source elements, `ndivideosrc` to get video from the stream and `ndiaudiosrc` for audio. By just providing the name or the ip of the stream, all the information required from the stream is picked up automatically, such as resolution, framerate, audio channels, ...
+Currently the plugin has a source element for receiving from NDI sources, a sink element to provide an NDI source and a device provider for discovering NDI sources on the network.
 
 Some examples of how to use these elements from the command line:
 
-```
-#Information about the elements
-gst-inspect-1.0 ndi
-gst-inspect-1.0 ndivideosrc
-gst-inspect-1.0 ndiaudiosrc
+```console
+# Information about the elements
+$ gst-inspect-1.0 ndi
+$ gst-inspect-1.0 ndisrc
+$ gst-inspect-1.0 ndisink
 
-#Video pipeline
-gst-launch-1.0 ndivideosrc ndi-name="GC-DEV2 (OBS)" ! autovideosink
-#Audio pipeline
-gst-launch-1.0 ndiaudiosrc ndi-name="GC-DEV2 (OBS)" ! autoaudiosink
+# Discover all NDI sources on the network
+$ gst-device-monitor-1.0 -f Source/Network:application/x-ndi
 
-#Video and audio pipeline
-gst-launch-1.0 ndivideosrc ndi-name="GC-DEV2 (OBS)" ! autovideosink ndiaudiosrc ndi-name="GC-DEV2 (OBS)" ! autoaudiosink
+# Audio/Video source pipeline
+$ gst-launch-1.0 ndisrc ndi-name="GC-DEV2 (OBS)" ! ndisrcdemux name=demux   demux.video ! queue ! videoconvert ! autovideosink  demux.audio ! queue ! audioconvert ! autoaudiosink
+
+# Audio/Video sink pipeline
+$ gst-launch-1.0 videotestsrc is-live=true ! video/x-raw,format=UYVY ! ndisinkcombiner name=combiner ! ndisink ndi-name="My NDI source"  audiotestsrc is-live=true ! combiner.audio
 ```
 
 Feel free to contribute to this project. Some ways you can contribute are:
@@ -32,11 +33,9 @@ Compilation of the NDI element
 -------
 To compile the NDI element it's necessary to install Rust, the NDI SDK and the following packages for gstreamer:
 
-```
-apt-get install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
-      gstreamer1.0-plugins-base gstreamer1.0-plugins-good \
-      gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
-      gstreamer1.0-libav libgstrtspserver-1.0-dev
+```console
+$ apt-get install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+      gstreamer1.0-plugins-base
 
 ```
 To install the required NDI library there are two options:
@@ -57,11 +56,12 @@ By defult GStreamer 1.18 is required, to use an older version. You can build wit
       
 
 If all went ok, you should see info related to the NDI element. To make the plugin available without using `GST_PLUGIN_PATH` it's necessary to copy the plugin to the gstreamer plugins folder.
-```
-cargo build --release
-sudo install -o root -g root -m 644 target/release/libgstndi.so /usr/lib/x86_64-linux-gnu/gstreamer-1.0/
-sudo ldconfig
-gst-inspect-1.0 ndi
+
+```console
+$ cargo build --release
+$ sudo install -o root -g root -m 644 target/release/libgstndi.so /usr/lib/x86_64-linux-gnu/gstreamer-1.0/
+$ sudo ldconfig
+$ gst-inspect-1.0 ndi
 ```
 
 More info about GStreamer plugins written in Rust:

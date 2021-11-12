@@ -39,10 +39,10 @@ extern "C" {
         p_instance: NDIlib_recv_instance_t,
         p_metadata: *const NDIlib_metadata_frame_t,
     ) -> bool;
-    pub fn NDIlib_recv_capture_v2(
+    pub fn NDIlib_recv_capture_v3(
         p_instance: NDIlib_recv_instance_t,
         p_video_data: *mut NDIlib_video_frame_v2_t,
-        p_audio_data: *mut NDIlib_audio_frame_v2_t,
+        p_audio_data: *mut NDIlib_audio_frame_v3_t,
         p_metadata: *mut NDIlib_metadata_frame_t,
         timeout_in_ms: u32,
     ) -> NDIlib_frame_type_e;
@@ -50,9 +50,9 @@ extern "C" {
         p_instance: NDIlib_recv_instance_t,
         p_video_data: *mut NDIlib_video_frame_v2_t,
     );
-    pub fn NDIlib_recv_free_audio_v2(
+    pub fn NDIlib_recv_free_audio_v3(
         p_instance: NDIlib_recv_instance_t,
-        p_audio_data: *mut NDIlib_audio_frame_v2_t,
+        p_audio_data: *mut NDIlib_audio_frame_v3_t,
     );
     pub fn NDIlib_recv_free_metadata(
         p_instance: NDIlib_recv_instance_t,
@@ -70,9 +70,9 @@ extern "C" {
         p_instance: NDIlib_send_instance_t,
         p_video_data: *const NDIlib_video_frame_v2_t,
     );
-    pub fn NDIlib_send_send_audio_v2(
+    pub fn NDIlib_send_send_audio_v3(
         p_instance: NDIlib_send_instance_t,
-        p_audio_data: *const NDIlib_audio_frame_v2_t,
+        p_audio_data: *const NDIlib_audio_frame_v3_t,
     );
 }
 
@@ -111,29 +111,110 @@ pub const NDIlib_recv_bandwidth_audio_only: NDIlib_recv_bandwidth_e = 10;
 pub const NDIlib_recv_bandwidth_lowest: NDIlib_recv_bandwidth_e = 0;
 pub const NDIlib_recv_bandwidth_highest: NDIlib_recv_bandwidth_e = 100;
 
-#[repr(u32)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum NDIlib_recv_color_format_e {
-    NDIlib_recv_color_format_BGRX_BGRA = 0,
-    NDIlib_recv_color_format_UYVY_BGRA = 1,
-    NDIlib_recv_color_format_RGBX_RGBA = 2,
-    NDIlib_recv_color_format_UYVY_RGBA = 3,
-    NDIlib_recv_color_format_fastest = 100,
-    NDIlib_recv_color_format_best = 101,
+pub type NDIlib_recv_color_format_e = u32;
+pub const NDIlib_recv_color_format_BGRX_BGRA: NDIlib_recv_color_format_e = 0;
+pub const NDIlib_recv_color_format_UYVY_BGRA: NDIlib_recv_color_format_e = 1;
+pub const NDIlib_recv_color_format_RGBX_RGBA: NDIlib_recv_color_format_e = 2;
+pub const NDIlib_recv_color_format_UYVY_RGBA: NDIlib_recv_color_format_e = 3;
+pub const NDIlib_recv_color_format_fastest: NDIlib_recv_color_format_e = 100;
+pub const NDIlib_recv_color_format_best: NDIlib_recv_color_format_e = 101;
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_recv_color_format_ex_compressed: NDIlib_recv_color_format_e = 300;
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_recv_color_format_ex_compressed_v2: NDIlib_recv_color_format_e = 301;
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_recv_color_format_ex_compressed_v3: NDIlib_recv_color_format_e = 302;
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_recv_color_format_ex_compressed_v3_with_audio: NDIlib_recv_color_format_e = 304;
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_recv_color_format_ex_compressed_v4: NDIlib_recv_color_format_e = 303;
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_recv_color_format_ex_compressed_v4_with_audio: NDIlib_recv_color_format_e = 305;
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_recv_color_format_ex_compressed_v5: NDIlib_recv_color_format_e = 307;
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_recv_color_format_ex_compressed_v5_with_audio: NDIlib_recv_color_format_e = 308;
+
+const fn make_fourcc(fourcc: &[u8; 4]) -> u32 {
+    ((fourcc[0] as u32) << 0)
+        | ((fourcc[1] as u32) << 8)
+        | ((fourcc[2] as u32) << 16)
+        | ((fourcc[3] as u32) << 24)
 }
 
 pub type NDIlib_FourCC_video_type_e = u32;
-pub const NDIlib_FourCC_video_type_UYVY: NDIlib_FourCC_video_type_e = 0x59_56_59_55;
-pub const NDIlib_FourCC_video_type_UYVA: NDIlib_FourCC_video_type_e = 0x41_56_56_55;
-pub const NDIlib_FourCC_video_type_P216: NDIlib_FourCC_video_type_e = 0x36_31_32_50;
-pub const NDIlib_FourCC_video_type_PA16: NDIlib_FourCC_video_type_e = 0x36_31_41_50;
-pub const NDIlib_FourCC_video_type_YV12: NDIlib_FourCC_video_type_e = 0x32_31_56_59;
-pub const NDIlib_FourCC_video_type_I420: NDIlib_FourCC_video_type_e = 0x30_32_34_49;
-pub const NDIlib_FourCC_video_type_NV12: NDIlib_FourCC_video_type_e = 0x32_31_56_4e;
-pub const NDIlib_FourCC_video_type_BGRA: NDIlib_FourCC_video_type_e = 0x41_52_47_42;
-pub const NDIlib_FourCC_video_type_BGRX: NDIlib_FourCC_video_type_e = 0x58_52_47_42;
-pub const NDIlib_FourCC_video_type_RGBA: NDIlib_FourCC_video_type_e = 0x41_42_47_52;
-pub const NDIlib_FourCC_video_type_RGBX: NDIlib_FourCC_video_type_e = 0x58_42_47_52;
+pub const NDIlib_FourCC_video_type_UYVY: NDIlib_FourCC_video_type_e = make_fourcc(b"UYVY");
+pub const NDIlib_FourCC_video_type_UYVA: NDIlib_FourCC_video_type_e = make_fourcc(b"UYVA");
+pub const NDIlib_FourCC_video_type_P216: NDIlib_FourCC_video_type_e = make_fourcc(b"P216");
+pub const NDIlib_FourCC_video_type_PA16: NDIlib_FourCC_video_type_e = make_fourcc(b"PA16");
+pub const NDIlib_FourCC_video_type_YV12: NDIlib_FourCC_video_type_e = make_fourcc(b"YV12");
+pub const NDIlib_FourCC_video_type_I420: NDIlib_FourCC_video_type_e = make_fourcc(b"I420");
+pub const NDIlib_FourCC_video_type_NV12: NDIlib_FourCC_video_type_e = make_fourcc(b"NV12");
+pub const NDIlib_FourCC_video_type_BGRA: NDIlib_FourCC_video_type_e = make_fourcc(b"BGRA");
+pub const NDIlib_FourCC_video_type_BGRX: NDIlib_FourCC_video_type_e = make_fourcc(b"BGRX");
+pub const NDIlib_FourCC_video_type_RGBA: NDIlib_FourCC_video_type_e = make_fourcc(b"RGBA");
+pub const NDIlib_FourCC_video_type_RGBX: NDIlib_FourCC_video_type_e = make_fourcc(b"RGBX");
+
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_FourCC_video_type_ex_SHQ0_highest_bandwidth: NDIlib_FourCC_video_type_e =
+    make_fourcc(b"SHQ0");
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_FourCC_video_type_ex_SHQ2_highest_bandwidth: NDIlib_FourCC_video_type_e =
+    make_fourcc(b"SHQ2");
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_FourCC_video_type_ex_SHQ7_highest_bandwidth: NDIlib_FourCC_video_type_e =
+    make_fourcc(b"SHQ7");
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_FourCC_video_type_ex_SHQ0_lowest_bandwidth: NDIlib_FourCC_video_type_e =
+    make_fourcc(b"shq0");
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_FourCC_video_type_ex_SHQ2_lowest_bandwidth: NDIlib_FourCC_video_type_e =
+    make_fourcc(b"shq2");
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_FourCC_video_type_ex_SHQ7_lowest_bandwidth: NDIlib_FourCC_video_type_e =
+    make_fourcc(b"shq7");
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_FourCC_video_type_ex_H264_highest_bandwidth: NDIlib_FourCC_video_type_e =
+    make_fourcc(b"H264");
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_FourCC_video_type_ex_H264_lowest_bandwidth: NDIlib_FourCC_video_type_e =
+    make_fourcc(b"h264");
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_FourCC_video_type_ex_HEVC_highest_bandwidth: NDIlib_FourCC_video_type_e =
+    make_fourcc(b"HEVC");
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_FourCC_video_type_ex_HEVC_lowest_bandwidth: NDIlib_FourCC_video_type_e =
+    make_fourcc(b"hevc");
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_FourCC_video_type_ex_H264_alpha_highest_bandwidth: NDIlib_FourCC_video_type_e =
+    make_fourcc(b"A264");
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_FourCC_video_type_ex_H264_alpha_lowest_bandwidth: NDIlib_FourCC_video_type_e =
+    make_fourcc(b"a264");
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_FourCC_video_type_ex_HEVC_alpha_highest_bandwidth: NDIlib_FourCC_video_type_e =
+    make_fourcc(b"AEVC");
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_FourCC_video_type_ex_HEVC_alpha_lowest_bandwidth: NDIlib_FourCC_video_type_e =
+    make_fourcc(b"aevc");
+
+pub type NDIlib_FourCC_audio_type_e = u32;
+pub const NDIlib_FourCC_audio_type_FLTp: NDIlib_FourCC_video_type_e = make_fourcc(b"FLTp");
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_FourCC_audio_type_AAC: NDIlib_FourCC_audio_type_e = 0x000000ff;
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_FourCC_audio_type_Opus: NDIlib_FourCC_audio_type_e = make_fourcc(b"Opus");
+
+#[cfg(feature = "advanced-sdk")]
+pub type NDIlib_compressed_FourCC_type_e = u32;
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_compressed_FourCC_type_H264: NDIlib_compressed_FourCC_type_e =
+    make_fourcc(b"H264");
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_compressed_FourCC_type_HEVC: NDIlib_compressed_FourCC_type_e =
+    make_fourcc(b"HEVC");
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_compressed_FourCC_type_AAC: NDIlib_compressed_FourCC_type_e = 0x000000ff;
 
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -212,36 +293,34 @@ pub struct NDIlib_video_frame_v2_t {
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
-pub struct NDIlib_audio_frame_v2_t {
+pub struct NDIlib_audio_frame_v3_t {
     pub sample_rate: ::std::os::raw::c_int,
     pub no_channels: ::std::os::raw::c_int,
     pub no_samples: ::std::os::raw::c_int,
     pub timecode: i64,
+    pub FourCC: NDIlib_FourCC_audio_type_e,
     pub p_data: *const ::std::os::raw::c_float,
-    pub channel_stride_in_bytes: ::std::os::raw::c_int,
+    pub channel_stride_or_data_size_in_bytes: ::std::os::raw::c_int,
     pub p_metadata: *const ::std::os::raw::c_char,
     pub timestamp: i64,
 }
 
-extern "C" {
-    pub fn NDIlib_util_audio_to_interleaved_16s_v2(
-        p_src: *const NDIlib_audio_frame_v2_t,
-        p_dst: *mut NDIlib_audio_frame_interleaved_16s_t,
-    );
-
-    pub fn NDIlib_util_audio_from_interleaved_16s_v2(
-        p_src: *const NDIlib_audio_frame_interleaved_16s_t,
-        p_dst: *mut NDIlib_audio_frame_v2_t,
-    );
-}
-
-#[repr(C)]
+#[cfg(feature = "advanced-sdk")]
+#[repr(packed)]
 #[derive(Debug, Copy, Clone)]
-pub struct NDIlib_audio_frame_interleaved_16s_t {
-    pub sample_rate: ::std::os::raw::c_int,
-    pub no_channels: ::std::os::raw::c_int,
-    pub no_samples: ::std::os::raw::c_int,
-    pub timecode: i64,
-    pub reference_level: ::std::os::raw::c_int,
-    pub p_data: *mut i16,
+pub struct NDIlib_compressed_packet_t {
+    pub version: u32,
+    pub fourcc: NDIlib_compressed_FourCC_type_e,
+    pub pts: i64,
+    pub dts: i64,
+    pub reserved: u64,
+    pub flags: u32,
+    pub data_size: u32,
+    pub extra_data_size: u32,
 }
+
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_compressed_packet_flags_keyframe: u32 = 1;
+
+#[cfg(feature = "advanced-sdk")]
+pub const NDIlib_compressed_packet_version_0: u32 = 44;
