@@ -64,7 +64,7 @@ impl ObjectSubclass for NdiSink {
 impl ObjectImpl for NdiSink {
     fn properties() -> &'static [glib::ParamSpec] {
         static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
-            vec![glib::ParamSpec::new_string(
+            vec![glib::ParamSpecString::new(
                 "ndi-name",
                 "NDI Name",
                 "NDI Name to use",
@@ -104,6 +104,8 @@ impl ObjectImpl for NdiSink {
         }
     }
 }
+
+impl GstObjectImpl for NdiSink {}
 
 impl ElementImpl for NdiSink {
     fn metadata() -> Option<&'static gst::subclass::ElementMetadata> {

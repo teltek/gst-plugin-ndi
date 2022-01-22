@@ -65,6 +65,8 @@ impl ObjectImpl for NdiSrcDemux {
     }
 }
 
+impl GstObjectImpl for NdiSrcDemux {}
+
 impl ElementImpl for NdiSrcDemux {
     fn metadata() -> Option<&'static gst::subclass::ElementMetadata> {
         static ELEMENT_METADATA: Lazy<gst::subclass::ElementMetadata> = Lazy::new(|| {
@@ -188,7 +190,7 @@ impl NdiSrcDemux {
                             }
                         }
 
-                        Ok(Some(ev))
+                        std::ops::ControlFlow::Continue(gst::EventForeachAction::Keep)
                     });
 
                     state.audio_caps = Some(caps.clone());
@@ -238,7 +240,7 @@ impl NdiSrcDemux {
                             }
                         }
 
-                        Ok(Some(ev))
+                        std::ops::ControlFlow::Continue(gst::EventForeachAction::Keep)
                     });
 
                     state.video_caps = Some(caps.clone());

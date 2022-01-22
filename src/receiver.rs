@@ -1070,8 +1070,8 @@ impl Receiver {
                 yres: video_frame.yres(),
                 fps_n: video_frame.frame_rate().0,
                 fps_d: video_frame.frame_rate().1,
-                par_n: *par.numer(),
-                par_d: *par.denom(),
+                par_n: par.numer(),
+                par_d: par.denom(),
                 interlace_mode,
             });
         }
@@ -1108,8 +1108,8 @@ impl Receiver {
                 yres: video_frame.yres(),
                 fps_n: video_frame.frame_rate().0,
                 fps_d: video_frame.frame_rate().1,
-                par_n: *par.numer(),
-                par_d: *par.denom(),
+                par_n: par.numer(),
+                par_d: par.denom(),
                 interlace_mode,
             });
         }
@@ -1146,8 +1146,8 @@ impl Receiver {
                 yres: video_frame.yres(),
                 fps_n: video_frame.frame_rate().0,
                 fps_d: video_frame.frame_rate().1,
-                par_n: *par.numer(),
-                par_d: *par.denom(),
+                par_n: par.numer(),
+                par_d: par.denom(),
                 interlace_mode,
             });
         }

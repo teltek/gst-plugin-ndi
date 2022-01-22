@@ -62,6 +62,8 @@ impl ObjectImpl for NdiSinkCombiner {
     }
 }
 
+impl GstObjectImpl for NdiSinkCombiner {}
+
 impl ElementImpl for NdiSinkCombiner {
     fn metadata() -> Option<&'static gst::subclass::ElementMetadata> {
         static ELEMENT_METADATA: Lazy<gst::subclass::ElementMetadata> = Lazy::new(|| {
@@ -259,10 +261,10 @@ impl AggregatorImpl for NdiSinkCombiner {
                 audio_info.rate() as u64 * audio_info.bpf() as u64,
             )
         } else if let Some(ref video_info) = state.video_info {
-            if *video_info.fps().numer() > 0 {
+            if video_info.fps().numer() > 0 {
                 gst::ClockTime::SECOND.mul_div_floor(
-                    *video_info.fps().denom() as u64,
-                    *video_info.fps().numer() as u64,
+                    video_info.fps().denom() as u64,
+                    video_info.fps().numer() as u64,
                 )
             } else {
                 gst::ClockTime::NONE
@@ -564,12 +566,9 @@ impl AggregatorImpl for NdiSinkCombiner {
 
                     // 2 frames latency because we queue 1 frame and wait until audio
                     // up to the end of that frame has arrived.
-                    let latency = if *info.fps().numer() > 0 {
+                    let latency = if info.fps().numer() > 0 {
                         gst::ClockTime::SECOND
-                            .mul_div_floor(
-                                2 * *info.fps().denom() as u64,
-                                *info.fps().numer() as u64,
-                            )
+                            .mul_div_floor(2 * info.fps().denom() as u64, info.fps().numer() as u64)
                             .unwrap_or(80 * gst::ClockTime::MSECOND)
                     } else {
                         // let's assume 25fps and 2 frames latency

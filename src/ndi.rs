@@ -793,14 +793,14 @@ impl<'a> VideoFrame<'a> {
         let picture_aspect_ratio =
             frame.info().par() * gst::Fraction::new(frame.width() as i32, frame.height() as i32);
         let picture_aspect_ratio =
-            *picture_aspect_ratio.numer() as f32 / *picture_aspect_ratio.denom() as f32;
+            picture_aspect_ratio.numer() as f32 / picture_aspect_ratio.denom() as f32;
 
         let ndi_frame = NDIlib_video_frame_v2_t {
             xres: frame.width() as i32,
             yres: frame.height() as i32,
             FourCC: format,
-            frame_rate_N: *frame.info().fps().numer(),
-            frame_rate_D: *frame.info().fps().denom(),
+            frame_rate_N: frame.info().fps().numer(),
+            frame_rate_D: frame.info().fps().denom(),
             picture_aspect_ratio,
             frame_format_type,
             timecode,
