@@ -20,61 +20,61 @@ use std::time;
 
 use once_cell::sync::Lazy;
 
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, glib::GEnum)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, glib::Enum)]
 #[repr(u32)]
-#[genum(type_name = "GstNdiTimestampMode")]
+#[enum_type(name = "GstNdiTimestampMode")]
 pub enum TimestampMode {
-    #[genum(name = "Receive Time / Timecode", nick = "receive-time-vs-timecode")]
+    #[enum_value(name = "Receive Time / Timecode", nick = "receive-time-vs-timecode")]
     ReceiveTimeTimecode = 0,
-    #[genum(name = "Receive Time / Timestamp", nick = "receive-time-vs-timestamp")]
+    #[enum_value(name = "Receive Time / Timestamp", nick = "receive-time-vs-timestamp")]
     ReceiveTimeTimestamp = 1,
-    #[genum(name = "NDI Timecode", nick = "timecode")]
+    #[enum_value(name = "NDI Timecode", nick = "timecode")]
     Timecode = 2,
-    #[genum(name = "NDI Timestamp", nick = "timestamp")]
+    #[enum_value(name = "NDI Timestamp", nick = "timestamp")]
     Timestamp = 3,
-    #[genum(name = "Receive Time", nick = "receive-time")]
+    #[enum_value(name = "Receive Time", nick = "receive-time")]
     ReceiveTime = 4,
 }
 
-#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, glib::GEnum)]
+#[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, glib::Enum)]
 #[repr(u32)]
-#[genum(type_name = "GstNdiRecvColorFormat")]
+#[enum_type(name = "GstNdiRecvColorFormat")]
 pub enum RecvColorFormat {
-    #[genum(name = "BGRX or BGRA", nick = "bgrx-bgra")]
+    #[enum_value(name = "BGRX or BGRA", nick = "bgrx-bgra")]
     BgrxBgra = 0,
-    #[genum(name = "UYVY or BGRA", nick = "uyvy-bgra")]
+    #[enum_value(name = "UYVY or BGRA", nick = "uyvy-bgra")]
     UyvyBgra = 1,
-    #[genum(name = "RGBX or RGBA", nick = "rgbx-rgba")]
+    #[enum_value(name = "RGBX or RGBA", nick = "rgbx-rgba")]
     RgbxRgba = 2,
-    #[genum(name = "UYVY or RGBA", nick = "uyvy-rgba")]
+    #[enum_value(name = "UYVY or RGBA", nick = "uyvy-rgba")]
     UyvyRgba = 3,
-    #[genum(name = "Fastest", nick = "fastest")]
+    #[enum_value(name = "Fastest", nick = "fastest")]
     Fastest = 4,
-    #[genum(name = "Best", nick = "best")]
+    #[enum_value(name = "Best", nick = "best")]
     Best = 5,
     #[cfg(feature = "advanced-sdk")]
-    #[genum(name = "Compressed v1", nick = "compressed-v1")]
+    #[enum_value(name = "Compressed v1", nick = "compressed-v1")]
     CompressedV1 = 6,
     #[cfg(feature = "advanced-sdk")]
-    #[genum(name = "Compressed v2", nick = "compressed-v2")]
+    #[enum_value(name = "Compressed v2", nick = "compressed-v2")]
     CompressedV2 = 7,
     #[cfg(feature = "advanced-sdk")]
-    #[genum(name = "Compressed v3", nick = "compressed-v3")]
+    #[enum_value(name = "Compressed v3", nick = "compressed-v3")]
     CompressedV3 = 8,
     #[cfg(feature = "advanced-sdk")]
-    #[genum(name = "Compressed v3 with audio", nick = "compressed-v3-with-audio")]
+    #[enum_value(name = "Compressed v3 with audio", nick = "compressed-v3-with-audio")]
     CompressedV3WithAudio = 9,
     #[cfg(feature = "advanced-sdk")]
-    #[genum(name = "Compressed v4", nick = "compressed-v4")]
+    #[enum_value(name = "Compressed v4", nick = "compressed-v4")]
     CompressedV4 = 10,
     #[cfg(feature = "advanced-sdk")]
-    #[genum(name = "Compressed v4 with audio", nick = "compressed-v4-with-audio")]
+    #[enum_value(name = "Compressed v4 with audio", nick = "compressed-v4-with-audio")]
     CompressedV4WithAudio = 11,
     #[cfg(feature = "advanced-sdk")]
-    #[genum(name = "Compressed v5", nick = "compressed-v5")]
+    #[enum_value(name = "Compressed v5", nick = "compressed-v5")]
     CompressedV5 = 12,
     #[cfg(feature = "advanced-sdk")]
-    #[genum(name = "Compressed v5 with audio", nick = "compressed-v5-with-audio")]
+    #[enum_value(name = "Compressed v5 with audio", nick = "compressed-v5-with-audio")]
     CompressedV5WithAudio = 13,
 }
 

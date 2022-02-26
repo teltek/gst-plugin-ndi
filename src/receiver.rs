@@ -249,14 +249,6 @@ impl Default for ObservationsInner {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
-struct TimeMapping {
-    xbase: u64,
-    b: u64,
-    num: u64,
-    den: u64,
-}
-
 impl Observations {
     fn new() -> Self {
         Self(Arc::new(Mutex::new(ObservationsInner::default())))
@@ -428,17 +420,6 @@ impl Observations {
         );
 
         (gst::ClockTime::from_nseconds(out_time), duration, false)
-    }
-}
-
-impl Default for TimeMapping {
-    fn default() -> Self {
-        Self {
-            xbase: 0,
-            b: 0,
-            num: 0,
-            den: 0,
-        }
     }
 }
 
@@ -1070,8 +1051,8 @@ impl Receiver {
                 yres: video_frame.yres(),
                 fps_n: video_frame.frame_rate().0,
                 fps_d: video_frame.frame_rate().1,
-                par_n: *par.numer(),
-                par_d: *par.denom(),
+                par_n: par.numer(),
+                par_d: par.denom(),
                 interlace_mode,
             });
         }
@@ -1108,8 +1089,8 @@ impl Receiver {
                 yres: video_frame.yres(),
                 fps_n: video_frame.frame_rate().0,
                 fps_d: video_frame.frame_rate().1,
-                par_n: *par.numer(),
-                par_d: *par.denom(),
+                par_n: par.numer(),
+                par_d: par.denom(),
                 interlace_mode,
             });
         }
@@ -1146,8 +1127,8 @@ impl Receiver {
                 yres: video_frame.yres(),
                 fps_n: video_frame.frame_rate().0,
                 fps_d: video_frame.frame_rate().1,
-                par_n: *par.numer(),
-                par_d: *par.denom(),
+                par_n: par.numer(),
+                par_d: par.denom(),
                 interlace_mode,
             });
         }

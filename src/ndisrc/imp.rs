@@ -105,28 +105,28 @@ impl ObjectImpl for NdiSrc {
     fn properties() -> &'static [glib::ParamSpec] {
         static PROPERTIES: Lazy<Vec<glib::ParamSpec>> = Lazy::new(|| {
             vec![
-                glib::ParamSpec::new_string(
+                glib::ParamSpecString::new(
                     "ndi-name",
                     "NDI Name",
                     "NDI stream name of the sender",
                     None,
                     glib::ParamFlags::READWRITE,
                 ),
-                glib::ParamSpec::new_string(
+                glib::ParamSpecString::new(
                     "url-address",
                     "URL/Address",
                     "URL/address and port of the sender, e.g. 127.0.0.1:5961",
                     None,
                     glib::ParamFlags::READWRITE,
                 ),
-                glib::ParamSpec::new_string(
+                glib::ParamSpecString::new(
                     "receiver-ndi-name",
                     "Receiver NDI Name",
                     "NDI stream name of this receiver",
                     Some(&*DEFAULT_RECEIVER_NDI_NAME),
                     glib::ParamFlags::READWRITE,
                 ),
-                glib::ParamSpec::new_uint(
+                glib::ParamSpecUInt::new(
                     "connect-timeout",
                     "Connect Timeout",
                     "Connection timeout in ms",
@@ -135,7 +135,7 @@ impl ObjectImpl for NdiSrc {
                     10000,
                     glib::ParamFlags::READWRITE,
                 ),
-                glib::ParamSpec::new_uint(
+                glib::ParamSpecUInt::new(
                     "timeout",
                     "Timeout",
                     "Receive timeout in ms",
@@ -144,7 +144,7 @@ impl ObjectImpl for NdiSrc {
                     5000,
                     glib::ParamFlags::READWRITE,
                 ),
-                glib::ParamSpec::new_uint(
+                glib::ParamSpecUInt::new(
                     "max-queue-length",
                     "Max Queue Length",
                     "Maximum receive queue length",
@@ -153,7 +153,7 @@ impl ObjectImpl for NdiSrc {
                     10,
                     glib::ParamFlags::READWRITE,
                 ),
-                glib::ParamSpec::new_int(
+                glib::ParamSpecInt::new(
                     "bandwidth",
                     "Bandwidth",
                     "Bandwidth, -10 metadata-only, 10 audio-only, 100 highest",
@@ -162,7 +162,7 @@ impl ObjectImpl for NdiSrc {
                     100,
                     glib::ParamFlags::READWRITE,
                 ),
-                glib::ParamSpec::new_enum(
+                glib::ParamSpecEnum::new(
                     "color-format",
                     "Color Format",
                     "Receive color format",
@@ -170,7 +170,7 @@ impl ObjectImpl for NdiSrc {
                     RecvColorFormat::UyvyBgra as u32 as i32,
                     glib::ParamFlags::READWRITE,
                 ),
-                glib::ParamSpec::new_enum(
+                glib::ParamSpecEnum::new(
                     "timestamp-mode",
                     "Timestamp Mode",
                     "Timestamp information to use for outgoing PTS",
@@ -359,6 +359,8 @@ impl ObjectImpl for NdiSrc {
         }
     }
 }
+
+impl GstObjectImpl for NdiSrc {}
 
 impl ElementImpl for NdiSrc {
     fn metadata() -> Option<&'static gst::subclass::ElementMetadata> {

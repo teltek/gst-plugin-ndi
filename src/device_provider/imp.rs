@@ -46,6 +46,8 @@ impl ObjectSubclass for DeviceProvider {
 
 impl ObjectImpl for DeviceProvider {}
 
+impl GstObjectImpl for DeviceProvider {}
+
 impl DeviceProviderImpl for DeviceProvider {
     fn metadata() -> Option<&'static gst::subclass::DeviceProviderMetadata> {
         static METADATA: Lazy<gst::subclass::DeviceProviderMetadata> = Lazy::new(|| {
@@ -209,6 +211,8 @@ impl ObjectSubclass for Device {
 }
 
 impl ObjectImpl for Device {}
+
+impl GstObjectImpl for Device {}
 
 impl DeviceImpl for Device {
     fn create_element(
