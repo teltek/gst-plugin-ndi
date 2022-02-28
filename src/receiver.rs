@@ -704,7 +704,7 @@ impl Receiver {
                     first_frame = false;
                     let mut buffer = receiver.create_audio_buffer_and_info(&element, frame);
                     if first_audio_frame {
-                        if let Ok(Buffer::Video(ref mut buffer, _)) = buffer {
+                        if let Ok(Buffer::Audio(ref mut buffer, _)) = buffer {
                             buffer
                                 .get_mut()
                                 .unwrap()
