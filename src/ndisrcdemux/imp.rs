@@ -147,11 +147,11 @@ impl NdiSrcDemux {
         &self,
         pad: &gst::Pad,
         element: &super::NdiSrcDemux,
-        buffer: gst::Buffer,
+        mut buffer: gst::Buffer,
     ) -> Result<gst::FlowSuccess, gst::FlowError> {
         gst_log!(CAT, obj: pad, "Handling buffer {:?}", buffer);
 
-        let meta = buffer.meta::<ndisrcmeta::NdiSrcMeta>().ok_or_else(|| {
+        let meta = buffer.make_mut().meta_mut::<ndisrcmeta::NdiSrcMeta>().ok_or_else(|| {
             gst_error!(CAT, obj: element, "Buffer without NDI source meta");
             gst::FlowError::Error
         })?;
@@ -265,6 +265,7 @@ impl NdiSrcDemux {
             }
         }
         drop(state);
+        meta.remove().unwrap();
 
         if add_pad {
             element.add_pad(&srcpad).unwrap();
