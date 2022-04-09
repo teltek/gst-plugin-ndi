@@ -48,6 +48,13 @@ impl ObjectSubclass for NdiSrcDemux {
                     |self_, element| self_.sink_chain(pad, element, buffer),
                 )
             })
+            .event_function(|pad, parent, event| {
+                NdiSrcDemux::catch_panic_pad_function(
+                    parent,
+                    || false,
+                    |self_, element| self_.sink_event(pad, element, event),
+                )
+            })
             .build();
 
         Self {
@@ -280,4 +287,26 @@ impl NdiSrcDemux {
         let mut state = self.state.lock().unwrap();
         state.combiner.update_pad_flow(&srcpad, res)
     }
+
+    fn sink_event(&self,
+        pad: &gst::Pad,
+        element: &super::NdiSrcDemux,
+        event: gst::Event
+    ) -> bool {
+        use gst::EventView;
+
+        gst_log!(CAT, obj: pad, "Handling event {:?}", event);
+        if let EventView::Eos(_) = event.view() {
+            if element.num_src_pads() == 0 {
+                // error out on EOS if no src pad are available
+                gst::element_error!(
+                    element,
+                    gst::StreamError::Demux,
+                    ["EOS without available srcpad(s)"]
+                );
+            }
+        }
+        pad.event_default(Some(element), event)
+    }
+
 }
