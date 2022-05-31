@@ -24,6 +24,7 @@ static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
 pub struct Receiver(Arc<ReceiverInner>);
 
 #[derive(Debug, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
 pub enum AudioInfo {
     AudioInfo(gst_audio::AudioInfo),
     #[cfg(feature = "advanced-sdk")]
@@ -169,12 +170,14 @@ impl VideoInfo {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum Buffer {
     Audio(gst::Buffer, AudioInfo),
     Video(gst::Buffer, VideoInfo),
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum ReceiverItem {
     Buffer(Buffer),
     Flushing,
@@ -564,6 +567,7 @@ impl Receiver {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn connect(
         element: &gst_base::BaseSrc,
         ndi_name: Option<&str>,

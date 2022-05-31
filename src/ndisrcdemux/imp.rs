@@ -124,6 +124,7 @@ impl ElementImpl for NdiSrcDemux {
         PAD_TEMPLATES.as_ref()
     }
 
+    #[allow(clippy::single_match)]
     fn change_state(
         &self,
         element: &Self::Type,
@@ -158,10 +159,13 @@ impl NdiSrcDemux {
     ) -> Result<gst::FlowSuccess, gst::FlowError> {
         gst_log!(CAT, obj: pad, "Handling buffer {:?}", buffer);
 
-        let meta = buffer.make_mut().meta_mut::<ndisrcmeta::NdiSrcMeta>().ok_or_else(|| {
-            gst_error!(CAT, obj: element, "Buffer without NDI source meta");
-            gst::FlowError::Error
-        })?;
+        let meta = buffer
+            .make_mut()
+            .meta_mut::<ndisrcmeta::NdiSrcMeta>()
+            .ok_or_else(|| {
+                gst_error!(CAT, obj: element, "Buffer without NDI source meta");
+                gst::FlowError::Error
+            })?;
 
         let mut events = vec![];
         let srcpad;
@@ -288,11 +292,7 @@ impl NdiSrcDemux {
         state.combiner.update_pad_flow(&srcpad, res)
     }
 
-    fn sink_event(&self,
-        pad: &gst::Pad,
-        element: &super::NdiSrcDemux,
-        event: gst::Event
-    ) -> bool {
+    fn sink_event(&self, pad: &gst::Pad, element: &super::NdiSrcDemux, event: gst::Event) -> bool {
         use gst::EventView;
 
         gst_log!(CAT, obj: pad, "Handling event {:?}", event);
@@ -308,5 +308,4 @@ impl NdiSrcDemux {
         }
         pad.event_default(Some(element), event)
     }
-
 }

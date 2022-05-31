@@ -136,7 +136,7 @@ pub const NDIlib_recv_color_format_ex_compressed_v5: NDIlib_recv_color_format_e 
 pub const NDIlib_recv_color_format_ex_compressed_v5_with_audio: NDIlib_recv_color_format_e = 308;
 
 const fn make_fourcc(fourcc: &[u8; 4]) -> u32 {
-    ((fourcc[0] as u32) << 0)
+    (fourcc[0] as u32)
         | ((fourcc[1] as u32) << 8)
         | ((fourcc[2] as u32) << 16)
         | ((fourcc[3] as u32) << 24)

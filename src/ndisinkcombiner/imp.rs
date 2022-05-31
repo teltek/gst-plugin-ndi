@@ -348,41 +348,41 @@ impl AggregatorImpl for NdiSinkCombiner {
             None => None,
         };
 
-        let audio_buffer_segment_and_pad;
-        if let Some(audio_pad) = self.audio_pad.lock().unwrap().clone() {
-            audio_buffer_segment_and_pad = match audio_pad.peek_buffer() {
-                Some(audio_buffer) if audio_buffer.size() == 0 => {
-                    // Skip empty/gap audio buffer
-                    audio_pad.drop_buffer();
-                    gst_trace!(CAT, obj: agg, "Empty audio buffer, waiting for next");
-                    return Err(gst_base::AGGREGATOR_FLOW_NEED_DATA);
-                }
-                Some(audio_buffer) => {
-                    let audio_segment = audio_pad.segment();
-                    let audio_segment = match audio_segment.downcast::<gst::ClockTime>() {
-                        Ok(audio_segment) => audio_segment,
-                        Err(audio_segment) => {
-                            gst_error!(
-                                CAT,
-                                obj: agg,
-                                "Audio segment of wrong format {:?}",
-                                audio_segment.format()
-                            );
-                            return Err(gst::FlowError::Error);
-                        }
-                    };
+        let audio_buffer_segment_and_pad =
+            if let Some(audio_pad) = self.audio_pad.lock().unwrap().clone() {
+                match audio_pad.peek_buffer() {
+                    Some(audio_buffer) if audio_buffer.size() == 0 => {
+                        // Skip empty/gap audio buffer
+                        audio_pad.drop_buffer();
+                        gst_trace!(CAT, obj: agg, "Empty audio buffer, waiting for next");
+                        return Err(gst_base::AGGREGATOR_FLOW_NEED_DATA);
+                    }
+                    Some(audio_buffer) => {
+                        let audio_segment = audio_pad.segment();
+                        let audio_segment = match audio_segment.downcast::<gst::ClockTime>() {
+                            Ok(audio_segment) => audio_segment,
+                            Err(audio_segment) => {
+                                gst_error!(
+                                    CAT,
+                                    obj: agg,
+                                    "Audio segment of wrong format {:?}",
+                                    audio_segment.format()
+                                );
+                                return Err(gst::FlowError::Error);
+                            }
+                        };
 
-                    Some((audio_buffer, audio_segment, audio_pad))
+                        Some((audio_buffer, audio_segment, audio_pad))
+                    }
+                    None if !audio_pad.is_eos() => {
+                        gst_trace!(CAT, obj: agg, "Waiting for audio buffer");
+                        return Err(gst_base::AGGREGATOR_FLOW_NEED_DATA);
+                    }
+                    None => None,
                 }
-                None if !audio_pad.is_eos() => {
-                    gst_trace!(CAT, obj: agg, "Waiting for audio buffer");
-                    return Err(gst_base::AGGREGATOR_FLOW_NEED_DATA);
-                }
-                None => None,
+            } else {
+                None
             };
-        } else {
-            audio_buffer_segment_and_pad = None;
-        }
 
         let mut state_storage = self.state.lock().unwrap();
         let state = match &mut *state_storage {

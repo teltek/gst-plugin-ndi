@@ -1,6 +1,7 @@
 use crate::ndisys;
 use crate::ndisys::*;
 use std::ffi;
+use std::fmt;
 use std::mem;
 use std::ptr;
 
@@ -226,11 +227,11 @@ impl<'a> RecvBuilder<'a> {
                     p_ndi_name: ndi_name
                         .as_ref()
                         .map(|s| s.as_ptr())
-                        .unwrap_or_else(|| ptr::null_mut()),
+                        .unwrap_or(ptr::null_mut()),
                     p_url_address: url_address
                         .as_ref()
                         .map(|s| s.as_ptr())
-                        .unwrap_or_else(|| ptr::null_mut()),
+                        .unwrap_or(ptr::null_mut()),
                 },
                 allow_video_fields: self.allow_video_fields,
                 bandwidth: self.bandwidth,
@@ -251,6 +252,17 @@ impl<'a> RecvBuilder<'a> {
 pub struct RecvInstance(ptr::NonNull<::std::os::raw::c_void>);
 
 unsafe impl Send for RecvInstance {}
+
+#[derive(Debug, Copy, Clone)]
+pub struct ReceiveError;
+
+impl fmt::Display for ReceiveError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Receive error")
+    }
+}
+
+impl std::error::Error for ReceiveError {}
 
 impl RecvInstance {
     pub fn builder<'a>(
@@ -284,7 +296,7 @@ impl RecvInstance {
         }
     }
 
-    pub fn capture(&self, timeout_in_ms: u32) -> Result<Option<Frame>, ()> {
+    pub fn capture(&self, timeout_in_ms: u32) -> Result<Option<Frame>, ReceiveError> {
         unsafe {
             let ptr = self.0.as_ptr();
 
@@ -310,7 +322,7 @@ impl RecvInstance {
                 NDIlib_frame_type_e::NDIlib_frame_type_metadata => Ok(Some(Frame::Metadata(
                     MetadataFrame::Borrowed(metadata_frame, self),
                 ))),
-                NDIlib_frame_type_e::NDIlib_frame_type_error => Err(()),
+                NDIlib_frame_type_e::NDIlib_frame_type_error => Err(ReceiveError),
                 _ => Ok(None),
             }
         }
@@ -443,6 +455,17 @@ pub enum VideoFrame<'a> {
         &'a gst_video::VideoFrameRef<&'a gst::BufferRef>,
     ),
 }
+
+#[derive(Debug, Copy, Clone)]
+pub struct TryFromVideoFrameError;
+
+impl fmt::Display for TryFromVideoFrameError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Can't handle video frame")
+    }
+}
+
+impl std::error::Error for TryFromVideoFrameError {}
 
 impl<'a> VideoFrame<'a> {
     pub fn xres(&self) -> i32 {
@@ -702,7 +725,7 @@ impl<'a> VideoFrame<'a> {
     pub fn try_from_video_frame(
         frame: &'a gst_video::VideoFrameRef<&'a gst::BufferRef>,
         timecode: i64,
-    ) -> Result<Self, ()> {
+    ) -> Result<Self, TryFromVideoFrameError> {
         // Planar formats must be in contiguous memory
         let format = match frame.format() {
             gst_video::VideoFormat::Uyvy => ndisys::NDIlib_FourCC_video_type_UYVY,
@@ -711,14 +734,14 @@ impl<'a> VideoFrame<'a> {
                     .checked_sub(frame.plane_data(0).unwrap().as_ptr() as usize)
                     != Some(frame.height() as usize * frame.plane_stride()[0] as usize)
                 {
-                    return Err(());
+                    return Err(TryFromVideoFrameError);
                 }
 
                 if (frame.plane_data(2).unwrap().as_ptr() as usize)
                     .checked_sub(frame.plane_data(1).unwrap().as_ptr() as usize)
                     != Some((frame.height() as usize + 1) / 2 * frame.plane_stride()[1] as usize)
                 {
-                    return Err(());
+                    return Err(TryFromVideoFrameError);
                 }
 
                 ndisys::NDIlib_FourCC_video_type_I420
@@ -728,7 +751,7 @@ impl<'a> VideoFrame<'a> {
                     .checked_sub(frame.plane_data(0).unwrap().as_ptr() as usize)
                     != Some(frame.height() as usize * frame.plane_stride()[0] as usize)
                 {
-                    return Err(());
+                    return Err(TryFromVideoFrameError);
                 }
 
                 ndisys::NDIlib_FourCC_video_type_NV12
@@ -738,7 +761,7 @@ impl<'a> VideoFrame<'a> {
                     .checked_sub(frame.plane_data(0).unwrap().as_ptr() as usize)
                     != Some(frame.height() as usize * frame.plane_stride()[0] as usize)
                 {
-                    return Err(());
+                    return Err(TryFromVideoFrameError);
                 }
 
                 ndisys::NDIlib_FourCC_video_type_NV12
@@ -748,14 +771,14 @@ impl<'a> VideoFrame<'a> {
                     .checked_sub(frame.plane_data(0).unwrap().as_ptr() as usize)
                     != Some(frame.height() as usize * frame.plane_stride()[0] as usize)
                 {
-                    return Err(());
+                    return Err(TryFromVideoFrameError);
                 }
 
                 if (frame.plane_data(2).unwrap().as_ptr() as usize)
                     .checked_sub(frame.plane_data(1).unwrap().as_ptr() as usize)
                     != Some((frame.height() as usize + 1) / 2 * frame.plane_stride()[1] as usize)
                 {
-                    return Err(());
+                    return Err(TryFromVideoFrameError);
                 }
 
                 ndisys::NDIlib_FourCC_video_type_YV12
@@ -764,7 +787,7 @@ impl<'a> VideoFrame<'a> {
             gst_video::VideoFormat::Bgrx => ndisys::NDIlib_FourCC_video_type_BGRX,
             gst_video::VideoFormat::Rgba => ndisys::NDIlib_FourCC_video_type_RGBA,
             gst_video::VideoFormat::Rgbx => ndisys::NDIlib_FourCC_video_type_RGBX,
-            _ => return Err(()),
+            _ => return Err(TryFromVideoFrameError),
         };
 
         let frame_format_type = match frame.info().interlace_mode() {
@@ -787,7 +810,7 @@ impl<'a> VideoFrame<'a> {
             {
                 NDIlib_frame_format_type_e::NDIlib_frame_format_type_field_1
             }
-            _ => return Err(()),
+            _ => return Err(TryFromVideoFrameError),
         };
 
         let picture_aspect_ratio =
@@ -834,6 +857,17 @@ pub enum AudioFrame<'a> {
     ),
     BorrowedRecv(NDIlib_audio_frame_v3_t, &'a RecvInstance),
 }
+
+#[derive(Debug, Copy, Clone)]
+pub struct TryFromAudioBufferError;
+
+impl fmt::Display for TryFromAudioBufferError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Can't handle audio buffer")
+    }
+}
+
+impl std::error::Error for TryFromAudioBufferError {}
 
 impl<'a> AudioFrame<'a> {
     pub fn sample_rate(&self) -> i32 {
@@ -1012,13 +1046,15 @@ impl<'a> AudioFrame<'a> {
         info: &gst_audio::AudioInfo,
         buffer: &gst::BufferRef,
         timecode: i64,
-    ) -> Result<Self, ()> {
+    ) -> Result<Self, TryFromAudioBufferError> {
         if info.format() != gst_audio::AUDIO_FORMAT_F32 {
-            return Err(());
+            return Err(TryFromAudioBufferError);
         }
 
-        let map = buffer.map_readable().map_err(|_| ())?;
-        let src_data = map.as_slice_of::<f32>().map_err(|_| ())?;
+        let map = buffer.map_readable().map_err(|_| TryFromAudioBufferError)?;
+        let src_data = map
+            .as_slice_of::<f32>()
+            .map_err(|_| TryFromAudioBufferError)?;
 
         let no_samples = src_data.len() as i32 / info.channels() as i32;
         let channel_stride_or_data_size_in_bytes = no_samples * mem::size_of::<f32>() as i32;
