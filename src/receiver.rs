@@ -10,6 +10,8 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::thread;
 
+use atomic_refcell::AtomicRefCell;
+
 use super::*;
 
 static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
@@ -225,8 +227,7 @@ struct ReceiverQueueInner {
 const WINDOW_LENGTH: u64 = 512;
 const WINDOW_DURATION: u64 = 2_000_000_000;
 
-#[derive(Clone)]
-struct Observations(Arc<Mutex<ObservationsInner>>);
+struct Observations(AtomicRefCell<ObservationsInner>);
 
 struct ObservationsInner {
     base_remote_time: Option<u64>,
@@ -254,7 +255,7 @@ impl Default for ObservationsInner {
 
 impl Observations {
     fn new() -> Self {
-        Self(Arc::new(Mutex::new(ObservationsInner::default())))
+        Self(AtomicRefCell::new(ObservationsInner::default()))
     }
 
     // Based on the algorithm used in GStreamer's rtpjitterbuffer, which comes from
@@ -282,7 +283,7 @@ impl Observations {
             gst::ClockTime::from_nseconds(remote_time),
         );
 
-        let mut inner = self.0.lock().unwrap();
+        let mut inner = self.0.borrow_mut();
 
         let (base_remote_time, base_local_time) =
             match (inner.base_remote_time, inner.base_local_time) {

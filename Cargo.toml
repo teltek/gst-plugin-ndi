@@ -16,6 +16,7 @@ gst-video = { package = "gstreamer-video", version = "0.18", features = ["v1_12"
 byte-slice-cast = "1"
 once_cell = "1.0"
 byteorder = "1.0"
+atomic_refcell = "0.1"
 
 [build-dependencies]
 gst-plugin-version-helper = "0.7"
