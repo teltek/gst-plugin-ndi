@@ -24,16 +24,18 @@ use once_cell::sync::Lazy;
 #[repr(u32)]
 #[enum_type(name = "GstNdiTimestampMode")]
 pub enum TimestampMode {
+    #[enum_value(name = "Auto", nick = "auto")]
+    Auto = 0,
     #[enum_value(name = "Receive Time / Timecode", nick = "receive-time-vs-timecode")]
-    ReceiveTimeTimecode = 0,
+    ReceiveTimeTimecode = 1,
     #[enum_value(name = "Receive Time / Timestamp", nick = "receive-time-vs-timestamp")]
-    ReceiveTimeTimestamp = 1,
+    ReceiveTimeTimestamp = 2,
     #[enum_value(name = "NDI Timecode", nick = "timecode")]
-    Timecode = 2,
+    Timecode = 3,
     #[enum_value(name = "NDI Timestamp", nick = "timestamp")]
-    Timestamp = 3,
+    Timestamp = 4,
     #[enum_value(name = "Receive Time", nick = "receive-time")]
-    ReceiveTime = 4,
+    ReceiveTime = 5,
 }
 
 #[derive(Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Clone, Copy, glib::Enum)]

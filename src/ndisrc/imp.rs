@@ -53,7 +53,7 @@ impl Default for Settings {
             max_queue_length: 10,
             bandwidth: ndisys::NDIlib_recv_bandwidth_highest,
             color_format: RecvColorFormat::UyvyBgra,
-            timestamp_mode: TimestampMode::ReceiveTimeTimecode,
+            timestamp_mode: TimestampMode::Auto,
         }
     }
 }
