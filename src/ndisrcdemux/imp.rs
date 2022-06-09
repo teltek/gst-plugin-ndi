@@ -276,6 +276,10 @@ impl NdiSrcDemux {
 
         if add_pad {
             element.add_pad(&srcpad).unwrap();
+            if element.num_src_pads() == 2 {
+                element.no_more_pads();
+            }
+
         }
 
         for ev in events {
