@@ -507,7 +507,9 @@ impl BaseSrcImpl for NdiSrc {
                 if let Some(latency) = state.current_latency {
                     let min = if matches!(
                         settings.timestamp_mode,
-                        TimestampMode::ReceiveTimeTimecode | TimestampMode::ReceiveTimeTimestamp
+                        TimestampMode::Auto
+                            | TimestampMode::ReceiveTimeTimecode
+                            | TimestampMode::ReceiveTimeTimestamp
                     ) {
                         latency
                     } else {
@@ -592,7 +594,7 @@ impl BaseSrcImpl for NdiSrc {
                                 gst::element_error!(
                                     element,
                                     gst::ResourceError::Settings,
-                                    ["Invalid audio info received: {:?}", info]
+                                    ["Invalid video info received: {:?}", info]
                                 );
                                 gst::FlowError::NotNegotiated
                             })?;
