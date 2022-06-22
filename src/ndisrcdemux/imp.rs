@@ -102,7 +102,7 @@ impl ElementImpl for NdiSrcDemux {
                 "audio",
                 gst::PadDirection::Src,
                 gst::PadPresence::Sometimes,
-                &gst::Caps::builder("audio/x-raw").build(),
+                &gst::Caps::new_any(),
             )
             .unwrap();
 
@@ -110,7 +110,7 @@ impl ElementImpl for NdiSrcDemux {
                 "video",
                 gst::PadDirection::Src,
                 gst::PadPresence::Sometimes,
-                &gst::Caps::builder("video/x-raw").build(),
+                &gst::Caps::new_any(),
             )
             .unwrap();
 
