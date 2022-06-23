@@ -10,6 +10,8 @@ use std::collections::VecDeque;
 use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::thread;
 
+use atomic_refcell::AtomicRefCell;
+
 use super::*;
 
 static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
@@ -20,10 +22,10 @@ static CAT: Lazy<gst::DebugCategory> = Lazy::new(|| {
     )
 });
 
-#[derive(Clone)]
 pub struct Receiver(Arc<ReceiverInner>);
 
 #[derive(Debug, PartialEq, Eq)]
+#[allow(clippy::large_enum_variant)]
 pub enum AudioInfo {
     AudioInfo(gst_audio::AudioInfo),
     #[cfg(feature = "advanced-sdk")]
@@ -169,12 +171,14 @@ impl VideoInfo {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum Buffer {
     Audio(gst::Buffer, AudioInfo),
     Video(gst::Buffer, VideoInfo),
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum ReceiverItem {
     Buffer(Buffer),
     Flushing,
@@ -186,7 +190,9 @@ pub struct ReceiverInner {
     queue: ReceiverQueue,
     max_queue_length: usize,
 
-    observations: Observations,
+    // Audio/video time observations
+    observations_timestamp: [Observations; 2],
+    observations_timecode: [Observations; 2],
 
     element: glib::WeakRef<gst_base::BaseSrc>,
     timestamp_mode: TimestampMode,
@@ -219,11 +225,12 @@ struct ReceiverQueueInner {
     timeout: bool,
 }
 
+const PREFILL_WINDOW_LENGTH: usize = 12;
 const WINDOW_LENGTH: u64 = 512;
 const WINDOW_DURATION: u64 = 2_000_000_000;
 
-#[derive(Clone)]
-struct Observations(Arc<Mutex<ObservationsInner>>);
+#[derive(Default)]
+struct Observations(AtomicRefCell<ObservationsInner>);
 
 struct ObservationsInner {
     base_remote_time: Option<u64>,
@@ -233,6 +240,11 @@ struct ObservationsInner {
     skew: i64,
     filling: bool,
     window_size: usize,
+
+    // Remote/local times for workaround around fundamentally wrong slopes
+    // This is not reset below and has a bigger window.
+    times: VecDeque<(u64, u64)>,
+    slope_correction: (u64, u64),
 }
 
 impl Default for ObservationsInner {
@@ -245,41 +257,69 @@ impl Default for ObservationsInner {
             skew: 0,
             filling: true,
             window_size: 0,
+            times: VecDeque::new(),
+            slope_correction: (1, 1),
         }
     }
 }
 
-impl Observations {
-    fn new() -> Self {
-        Self(Arc::new(Mutex::new(ObservationsInner::default())))
+impl ObservationsInner {
+    fn reset(&mut self) {
+        self.base_local_time = None;
+        self.base_remote_time = None;
+        self.deltas = VecDeque::new();
+        self.min_delta = 0;
+        self.skew = 0;
+        self.filling = true;
+        self.window_size = 0;
     }
+}
 
+impl Observations {
     // Based on the algorithm used in GStreamer's rtpjitterbuffer, which comes from
     // Fober, Orlarey and Letz, 2005, "Real Time Clock Skew Estimation over Network Delays":
     // http://citeseerx.ist.psu.edu/viewdoc/summary?doi=10.1.1.102.1546
     fn process(
         &self,
         element: &gst_base::BaseSrc,
-        time: (Option<gst::ClockTime>, gst::ClockTime),
+        remote_time: Option<gst::ClockTime>,
+        local_time: gst::ClockTime,
         duration: Option<gst::ClockTime>,
-    ) -> (gst::ClockTime, Option<gst::ClockTime>, bool) {
-        if time.0.is_none() {
-            return (time.1, duration, false);
-        }
+    ) -> Option<(gst::ClockTime, Option<gst::ClockTime>, bool)> {
+        let remote_time = remote_time?.nseconds();
+        let local_time = local_time.nseconds();
 
-        let time = (time.0.unwrap(), time.1);
-        let remote_time = time.0.nseconds();
-        let local_time = time.1.nseconds();
+        let mut inner = self.0.borrow_mut();
 
         gst_trace!(
             CAT,
             obj: element,
-            "Local time {}, remote time {}",
+            "Local time {}, remote time {}, slope correct {}/{}",
             gst::ClockTime::from_nseconds(local_time),
             gst::ClockTime::from_nseconds(remote_time),
+            inner.slope_correction.0,
+            inner.slope_correction.1,
         );
 
-        let mut inner = self.0.lock().unwrap();
+        inner.times.push_back((remote_time, local_time));
+        while inner
+            .times
+            .back()
+            .unwrap()
+            .1
+            .saturating_sub(inner.times.front().unwrap().1)
+            > WINDOW_DURATION
+        {
+            let _ = inner.times.pop_front();
+        }
+
+        // Static remote times
+        if inner.slope_correction.1 == 0 {
+            return None;
+        }
+
+        let remote_time =
+            remote_time.mul_div_round(inner.slope_correction.0, inner.slope_correction.1)?;
 
         let (base_remote_time, base_local_time) =
             match (inner.base_remote_time, inner.base_local_time) {
@@ -295,9 +335,101 @@ impl Observations {
                     inner.base_remote_time = Some(remote_time);
                     inner.base_local_time = Some(local_time);
 
-                    return (gst::ClockTime::from_nseconds(local_time), duration, true);
+                    return Some((gst::ClockTime::from_nseconds(local_time), duration, true));
                 }
             };
+
+        if inner.times.len() < PREFILL_WINDOW_LENGTH {
+            return Some((gst::ClockTime::from_nseconds(local_time), duration, false));
+        }
+
+        // Check if the slope is simply wrong and try correcting
+        {
+            let local_diff = inner
+                .times
+                .back()
+                .unwrap()
+                .1
+                .saturating_sub(inner.times.front().unwrap().1);
+            let remote_diff = inner
+                .times
+                .back()
+                .unwrap()
+                .0
+                .saturating_sub(inner.times.front().unwrap().0);
+
+            if remote_diff == 0 {
+                inner.reset();
+                inner.base_remote_time = Some(remote_time);
+                inner.base_local_time = Some(local_time);
+
+                // Static remote times
+                inner.slope_correction = (0, 0);
+                return None;
+            } else {
+                let slope = local_diff as f64 / remote_diff as f64;
+                let scaled_slope =
+                    slope * (inner.slope_correction.1 as f64) / (inner.slope_correction.0 as f64);
+
+                // Check for some obviously wrong slopes and try to correct for that
+                if !(0.5..1.5).contains(&scaled_slope) {
+                    gst_warning!(
+                        CAT,
+                        obj: element,
+                        "Too small/big slope {}, resetting",
+                        scaled_slope
+                    );
+
+                    let discont = !inner.deltas.is_empty();
+                    inner.reset();
+
+                    if (0.0005..0.0015).contains(&slope) {
+                        // Remote unit was actually 0.1ns
+                        inner.slope_correction = (1, 1000);
+                    } else if (0.005..0.015).contains(&slope) {
+                        // Remote unit was actually 1ns
+                        inner.slope_correction = (1, 100);
+                    } else if (0.05..0.15).contains(&slope) {
+                        // Remote unit was actually 10ns
+                        inner.slope_correction = (1, 10);
+                    } else if (5.0..15.0).contains(&slope) {
+                        // Remote unit was actually 1us
+                        inner.slope_correction = (10, 1);
+                    } else if (50.0..150.0).contains(&slope) {
+                        // Remote unit was actually 10us
+                        inner.slope_correction = (100, 1);
+                    } else if (50.0..150.0).contains(&slope) {
+                        // Remote unit was actually 100us
+                        inner.slope_correction = (1000, 1);
+                    } else if (50.0..150.0).contains(&slope) {
+                        // Remote unit was actually 1ms
+                        inner.slope_correction = (10000, 1);
+                    } else {
+                        inner.slope_correction = (1, 1);
+                    }
+
+                    let remote_time = inner
+                        .times
+                        .back()
+                        .unwrap()
+                        .0
+                        .mul_div_round(inner.slope_correction.0, inner.slope_correction.1)?;
+                    gst_debug!(
+                        CAT,
+                        obj: element,
+                        "Initializing base time: local {}, remote {}, slope correction {}/{}",
+                        gst::ClockTime::from_nseconds(local_time),
+                        gst::ClockTime::from_nseconds(remote_time),
+                        inner.slope_correction.0,
+                        inner.slope_correction.1,
+                    );
+                    inner.base_remote_time = Some(remote_time);
+                    inner.base_local_time = Some(local_time);
+
+                    return Some((gst::ClockTime::from_nseconds(local_time), duration, discont));
+                }
+            }
+        }
 
         let remote_diff = remote_time.saturating_sub(base_remote_time);
         let local_diff = local_time.saturating_sub(base_local_time);
@@ -312,33 +444,6 @@ impl Observations {
             delta,
         );
 
-        if remote_diff > 0 && local_diff > 0 {
-            let slope = (local_diff as f64) / (remote_diff as f64);
-            if !(0.8..1.2).contains(&slope) {
-                gst_warning!(
-                    CAT,
-                    obj: element,
-                    "Too small/big slope {}, resetting",
-                    slope
-                );
-
-                let discont = !inner.deltas.is_empty();
-                *inner = ObservationsInner::default();
-
-                gst_debug!(
-                    CAT,
-                    obj: element,
-                    "Initializing base time: local {}, remote {}",
-                    gst::ClockTime::from_nseconds(local_time),
-                    gst::ClockTime::from_nseconds(remote_time),
-                );
-                inner.base_remote_time = Some(remote_time);
-                inner.base_local_time = Some(local_time);
-
-                return (gst::ClockTime::from_nseconds(local_time), duration, discont);
-            }
-        }
-
         if (delta > inner.skew && delta - inner.skew > 1_000_000_000)
             || (delta < inner.skew && inner.skew - delta > 1_000_000_000)
         {
@@ -351,7 +456,6 @@ impl Observations {
             );
 
             let discont = !inner.deltas.is_empty();
-            *inner = ObservationsInner::default();
 
             gst_debug!(
                 CAT,
@@ -360,10 +464,12 @@ impl Observations {
                 gst::ClockTime::from_nseconds(local_time),
                 gst::ClockTime::from_nseconds(remote_time),
             );
+
+            inner.reset();
             inner.base_remote_time = Some(remote_time);
             inner.base_local_time = Some(local_time);
 
-            return (gst::ClockTime::from_nseconds(local_time), duration, discont);
+            return Some((gst::ClockTime::from_nseconds(local_time), duration, discont));
         }
 
         if inner.filling {
@@ -419,7 +525,7 @@ impl Observations {
             gst::ClockTime::from_nseconds(out_time)
         );
 
-        (gst::ClockTime::from_nseconds(out_time), duration, false)
+        Some((gst::ClockTime::from_nseconds(out_time), duration, false))
     }
 }
 
@@ -484,7 +590,8 @@ impl Receiver {
                 Condvar::new(),
             ))),
             max_queue_length,
-            observations: Observations::new(),
+            observations_timestamp: Default::default(),
+            observations_timecode: Default::default(),
             element: element.downgrade(),
             timestamp_mode,
             timeout,
@@ -564,6 +671,7 @@ impl Receiver {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn connect(
         element: &gst_base::BaseSrc,
         ndi_name: Option<&str>,
@@ -775,6 +883,7 @@ impl Receiver {
     fn calculate_timestamp(
         &self,
         element: &gst_base::BaseSrc,
+        is_audio: bool,
         timestamp: i64,
         timecode: i64,
         duration: Option<gst::ClockTime>,
@@ -800,17 +909,38 @@ impl Receiver {
             real_time_now,
         );
 
+        let res_timestamp = self.0.observations_timestamp[if is_audio { 0 } else { 1 }].process(
+            element,
+            timestamp,
+            receive_time,
+            duration,
+        );
+
+        let res_timecode = self.0.observations_timecode[if is_audio { 0 } else { 1 }].process(
+            element,
+            Some(timecode),
+            receive_time,
+            duration,
+        );
+
         let (pts, duration, discont) = match self.0.timestamp_mode {
-            TimestampMode::ReceiveTimeTimecode => {
-                self.0
-                    .observations
-                    .process(element, (Some(timecode), receive_time), duration)
-            }
-            TimestampMode::ReceiveTimeTimestamp => {
-                self.0
-                    .observations
-                    .process(element, (timestamp, receive_time), duration)
-            }
+            TimestampMode::ReceiveTimeTimecode => match res_timecode {
+                Some((pts, duration, discont)) => (pts, duration, discont),
+                None => {
+                    gst_warning!(CAT, obj: element, "Can't calculate timestamp");
+                    (receive_time, duration, false)
+                }
+            },
+            TimestampMode::ReceiveTimeTimestamp => match res_timestamp {
+                Some((pts, duration, discont)) => (pts, duration, discont),
+                None => {
+                    if timestamp.is_some() {
+                        gst_warning!(CAT, obj: element, "Can't calculate timestamp");
+                    }
+
+                    (receive_time, duration, false)
+                }
+            },
             TimestampMode::Timecode => (timecode, duration, false),
             TimestampMode::Timestamp if timestamp.is_none() => (receive_time, duration, false),
             TimestampMode::Timestamp => {
@@ -829,6 +959,11 @@ impl Receiver {
                 }
             }
             TimestampMode::ReceiveTime => (receive_time, duration, false),
+            TimestampMode::Auto => {
+                res_timecode
+                    .or(res_timestamp)
+                    .unwrap_or((receive_time, duration, false))
+            }
         };
 
         gst_log!(
@@ -883,6 +1018,7 @@ impl Receiver {
 
         self.calculate_timestamp(
             element,
+            false,
             video_frame.timestamp(),
             video_frame.timecode(),
             duration,
@@ -1433,6 +1569,7 @@ impl Receiver {
 
         self.calculate_timestamp(
             element,
+            true,
             audio_frame.timestamp(),
             audio_frame.timecode(),
             duration,
